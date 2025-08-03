@@ -1,0 +1,129 @@
+### Test TTS Generate API
+POST http://localhost:5094/api/tts/generate
+Content-Type: application/json
+
+{
+  "text": "你好，这是一个测试文本",
+  "voice": "zh-CN-XiaoyiNeural",
+  "rate": "0%",
+  "pitch": "0%",
+  "volume": "0%",
+  "useLLM": false
+}
+
+### Test TTS Stream API
+POST http://localhost:5094/api/tts/stream
+Content-Type: application/json
+
+{
+  "text": "这是流式生成测试，文本会被实时转换为语音并流式返回",
+  "voice": "zh-CN-XiaoyiNeural",
+  "rate": "0%",
+  "pitch": "0%",
+  "volume": "0%",
+  "useLLM": false
+}
+
+### Test TTS Stream API with longer text
+POST http://localhost:5094/api/tts/stream
+Content-Type: application/json
+
+{
+  "text": "这是一个更长的文本用于测试流式生成功能。当文本很长时，系统会自动将其分割成多个段落，然后逐段生成语音并合并为一个连续的音频流。这样可以提供更好的用户体验，用户可以在生成过程中就开始听到音频内容，而不需要等待整个文本处理完成。",
+  "voice": "zh-CN-XiaoyiNeural",
+  "rate": "0%",
+  "pitch": "0%",
+  "volume": "0%",
+  "useLLM": false
+}
+
+### Test with English voice
+POST http://localhost:5094/api/tts/stream
+Content-Type: application/json
+
+{
+  "text": "Hello, this is a test of English text-to-speech streaming functionality.",
+  "voice": "en-US-AriaNeural",
+  "rate": "0%",
+  "pitch": "0%",
+  "volume": "0%",
+  "useLLM": false
+}
+
+### Test JSON TTS API (placeholder)
+POST http://localhost:5094/api/tts/json
+Content-Type: application/json
+
+{
+  "data": [
+    {
+      "text": "第一段文本",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "0%",
+      "pitch": "0%",
+      "volume": "0%"
+    },
+    {
+      "text": "第二段文本",
+      "voice": "zh-CN-YunyangNeural",
+      "rate": "0%",
+      "pitch": "0%",
+      "volume": "0%"
+    }
+  ]
+}
+
+### Test Doubao TTS with Chinese female voice
+POST http://localhost:5094/api/tts/synthesize
+Content-Type: application/json
+
+{
+  "text": "你好，欢迎使用豆包语音合成服务！这是一个高质量的中文语音合成测试。",
+  "engine": "doubao",
+  "voice": "zh_female_1",
+  "outputPath": "doubao_test_chinese"
+}
+
+### Test Doubao TTS with Chinese male voice
+POST http://localhost:5094/api/tts/synthesize
+Content-Type: application/json
+
+{
+  "text": "豆包TTS引擎支持多种语音类型，包括中文男声和女声。",
+  "engine": "doubao",
+  "voice": "zh_male_1",
+  "outputPath": "doubao_test_male"
+}
+
+### Test Doubao TTS with English voice
+POST http://localhost:5094/api/tts/synthesize
+Content-Type: application/json
+
+{
+  "text": "Hello, this is a test using Doubao TTS engine with English voice.",
+  "engine": "doubao",
+  "voice": "en_female_1",
+  "outputPath": "doubao_test_english"
+}
+
+### Test Doubao TTS with advanced voice (S_ prefix)
+POST http://localhost:5094/api/tts/synthesize
+Content-Type: application/json
+
+{
+  "text": "这是使用高级语音模型的测试，S_前缀的语音会自动选择volcano_icl集群。",
+  "engine": "doubao",
+  "voice": "S_zh_female_1",
+  "outputPath": "doubao_test_advanced"
+}
+
+### Test Doubao TTS streaming
+POST http://localhost:5094/api/tts/stream
+Content-Type: application/json
+
+{
+  "text": "这是豆包TTS流式合成测试。流式合成可以实时生成音频数据，提供更好的用户体验。",
+  "engine": "doubao",
+  "voice": "zh_female_2",
+  "outputPath": "doubao_test_stream"
+}

@@ -1,0 +1,276 @@
+/* App.css - EasyVoice 主应用样式 */
+
+/* 头部样式 */
+.header-gradient {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  padding: 0;
+}
+
+.header-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 24px;
+  height: 64px;
+}
+
+.logo-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo-avatar {
+  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+.logo-title {
+  color: white !important;
+  margin: 0 !important;
+  font-weight: 600;
+  font-size: 20px;
+}
+
+.desktop-menu {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+
+.main-menu {
+  background: transparent !important;
+  border-bottom: none !important;
+  min-width: 300px;
+}
+
+.main-menu .ant-menu-item {
+  color: rgba(255, 255, 255, 0.85) !important;
+  border-radius: 6px;
+  margin: 0 4px;
+  transition: all 0.3s ease;
+}
+
+.main-menu .ant-menu-item:hover {
+  color: white !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+
+.main-menu .ant-menu-item-selected {
+  color: white !important;
+  background: rgba(255, 255, 255, 0.2) !important;
+  font-weight: 600;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.github-link {
+  color: rgba(255, 255, 255, 0.85);
+  transition: all 0.3s ease;
+  padding: 8px;
+  border-radius: 6px;
+}
+
+.github-link:hover {
+  color: white;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.github-icon {
+  font-size: 18px;
+}
+
+.mobile-menu-btn {
+  display: none;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 6px;
+  transition: all 0.3s ease;
+}
+
+.mobile-menu-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.menu-icon {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 18px;
+}
+
+/* 主内容区域 */
+.main-content {
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  min-height: calc(100vh - 64px - 70px);
+  padding: 0;
+}
+
+.error-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 16px 24px 0;
+}
+
+.error-alert {
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.content-wrapper {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px;
+  min-height: 100%;
+}
+
+/* 页脚样式 */
+.app-footer {
+  background: #001529;
+  color: rgba(255, 255, 255, 0.65);
+  text-align: center;
+  padding: 24px 0;
+}
+
+.footer-content p {
+  margin: 4px 0;
+  font-size: 14px;
+}
+
+.footer-content p:first-child {
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* 移动端抽屉 */
+.mobile-drawer .ant-drawer-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.mobile-drawer .ant-drawer-title {
+  color: white;
+}
+
+.mobile-drawer .ant-drawer-close {
+  color: white;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .desktop-menu {
+    display: none;
+  }
+  
+  .mobile-menu-btn {
+    display: block;
+  }
+  
+  .header-content {
+    padding: 0 16px;
+  }
+  
+  .content-wrapper {
+    padding: 16px;
+  }
+  
+  .error-container {
+    padding: 16px 16px 0;
+  }
+  
+  .logo-title {
+    font-size: 18px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .header-content {
+    padding: 0 12px;
+  }
+  
+  .content-wrapper {
+    padding: 12px;
+  }
+  
+  .logo-section {
+    gap: 8px;
+  }
+  
+  .logo-title {
+    font-size: 16px !important;
+  }
+}
+
+/* 自定义滚动条 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* 动画效果 */
+.ant-layout {
+  transition: all 0.3s ease;
+}
+
+.ant-menu-item {
+  transition: all 0.3s ease;
+}
+
+.ant-btn {
+  transition: all 0.3s ease;
+}
+
+/* 卡片阴影效果 */
+.ant-card {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  transition: box-shadow 0.3s ease;
+}
+
+.ant-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+/* 表单样式优化 */
+.ant-form-item-label > label {
+  font-weight: 500;
+}
+
+.ant-input, .ant-select-selector, .ant-input-number {
+  border-radius: 6px;
+}
+
+.ant-btn {
+  border-radius: 6px;
+  font-weight: 500;
+}
+
+/* 主题色彩 */
+.ant-btn-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+}
+
+.ant-btn-primary:hover {
+  background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+}
