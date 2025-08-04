@@ -62,7 +62,7 @@ const VoiceSettingsPanel: React.FC<VoiceSettingsPanelProps> = ({
                   <Select.Option value="zh-CN-XiaoyiNeural">👩 晓伊 (清新女声)</Select.Option>
                 </Select>
               </Form.Item>
-              <Form.Item label={`⚡ 语速调节: ${config.ttsConfig.speed}x`}>
+              <Form.Item label={`⚡ 语速调节: ${config.ttsConfig.speed}x` } style={{ width: "95%" }}>
                 <Slider
                   min={0.5}
                   max={2.0}
@@ -78,16 +78,16 @@ const VoiceSettingsPanel: React.FC<VoiceSettingsPanelProps> = ({
                   style={{ margin: "0 8px" }}
                 />
               </Form.Item>
-              <Form.Item label={`🔊 音量控制: ${config.ttsConfig.volume}%`}>
+              <Form.Item label={`🔊 音量控制: ${config.ttsConfig.volume}%`} style={{ width: "95%" }}>
                 <Slider
                   min={0}
                   max={100}
                   value={config.ttsConfig.volume}
                   onChange={(value) => updateTtsConfig({ volume: value })}
                   marks={{
-                    0: "静音",
-                    50: "中等",
-                    100: "最大",
+                    0: "静",
+                    50: "中",
+                    100: "大",
                   }}
                   style={{ margin: "0 8px" }}
                 />
@@ -96,7 +96,7 @@ const VoiceSettingsPanel: React.FC<VoiceSettingsPanelProps> = ({
           </div>
         </TabPane>
         <TabPane tab="🤖 AI配置" key="llm">
-          <div style={tabContentStyle}>
+          <div style={{ ...tabContentStyle, paddingRight: 16 }}>
             <Form layout="vertical">
               <Form.Item label="🔧 AI服务商">
                 <Select

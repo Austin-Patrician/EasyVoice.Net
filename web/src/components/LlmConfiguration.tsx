@@ -225,7 +225,7 @@ const LlmConfiguration: React.FC = () => {
       </div>
 
       {/* 配置列表 */}
-      <div className="space-y-4">
+      <div className="space-y-4 pr-4">
         {config.llmConfigurations.length === 0 ? (
           <div className="text-center py-8 text-gray-500">
             <SettingOutlined className="w-12 h-12 mx-auto mb-4 text-gray-300" />
