@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { AudioConfig, Voice, LLMSettings, VoiceMode, LLMProvider } from '../types';
+import type { AudioConfig, Voice, VoiceMode, LLMProvider, OpenAIConfig, DoubaoConfig } from '../types';
 import { DEFAULT_AUDIO_CONFIG } from '../constants';
 
 interface AudioConfigState {
@@ -34,8 +34,7 @@ interface AudioConfigState {
   updatePreviewAudioUrl: (url: string) => void;
   
   // LLM语音配置
-  updateLLMSettings: (settings: Partial<LLMSettings>) => void;
-  updateLLMConfiguration: () => void;
+  updateLLMConfiguration: (provider: LLMProvider, config: OpenAIConfig | DoubaoConfig) => void;
   updateVoiceMode: (mode: VoiceMode) => void;
   updateLLMProvider: (provider: LLMProvider) => void;
 }
@@ -132,32 +131,19 @@ export const useAudioConfigStore = create<AudioConfigState>()(
       },
       
       // 更新LLM配置
-      updateLLMSettings: (settings) => {
+      updateLLMConfiguration: (provider, config) => {
         set((state) => ({
           config: {
             ...state.config,
-            llmSettings: {
-              ...state.config.llmSettings,
-              ...settings,
+            llmConfiguration: {
+              ...state.config.llmConfiguration,
+              [provider]: {
+                ...state.config.llmConfiguration[provider],
+                ...config,
+              },
             },
           },
         }));
-      },
-
-      // 更新LLM配置（统一配置）
-      updateLLMConfiguration: () => {
-        set((state) => {
-          const { llmSettings } = state.config;
-          return {
-            config: {
-              ...state.config,
-              llmConfiguration: {
-                openai: llmSettings.openai || DEFAULT_AUDIO_CONFIG.llmConfiguration.openai,
-                doubao: llmSettings.doubao || DEFAULT_AUDIO_CONFIG.llmConfiguration.doubao,
-              },
-            },
-          };
-        });
       },
       
       // 更新语音模式

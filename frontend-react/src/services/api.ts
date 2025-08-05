@@ -220,18 +220,14 @@ export class ApiService {
       baseUrl: string;
       apiKey: string;
       model: string;
+      voice: string;
+      speed?: number;
+      pitch?: number;
+      volume?: number;
     }
   ): Promise<GenerateResponse['data']> {
     try {
-      const request: GenerateRequest = {
-        text,
-        useLLM: true,
-        openaiBaseUrl: openaiConfig.baseUrl,
-        openaiKey: openaiConfig.apiKey,
-        openaiModel: openaiConfig.model,
-      };
-
-      return await this.generateAudio(request);
+      return await this.generateOpenAITTS(text, openaiConfig);
     } catch (error) {
       console.error('AI语音生成失败:', error);
       throw error;

@@ -54,7 +54,6 @@ export interface AudioConfig {
   selectedVoice: string;
   
   // LLM配置
-  llmSettings: LLMSettings;
   llmConfiguration: LLMConfiguration;
   
   // 文本相关
@@ -63,9 +62,6 @@ export interface AudioConfig {
   previewAudioUrl: string;
   
   // 兼容性字段（保留以防向后兼容）
-  openaiBaseUrl?: string;
-  openaiKey?: string;
-  openaiModel?: string;
   superLong?: boolean;
 }
 
@@ -118,9 +114,6 @@ export interface GenerateRequest {
   rate?: string;
   pitch?: string;
   useLLM?: boolean;
-  openaiBaseUrl?: string;
-  openaiKey?: string;
-  openaiModel?: string;
   gender?: string;
 }
 
@@ -197,3 +190,109 @@ export type ApiResponse<T> = {
   success: true;
   data: T;
 } | ApiError;
+
+// 实时语音对话相关类型
+export enum RealTimeConnectionState {
+  Disconnected = 'disconnected',
+  Connecting = 'connecting',
+  Connected = 'connected',
+  InSession = 'in_session',
+  Disconnecting = 'disconnecting',
+  Error = 'error'
+}
+
+export interface RealTimeConfig {
+  webSocketUrl: string;
+  appId: string;
+  accessToken: string;
+  connectionTimeoutMs?: number;
+  heartbeatIntervalMs?: number;
+  audioBufferSeconds?: number;
+  inputSampleRate?: number;
+  outputSampleRate?: number;
+}
+
+export interface RealTimeAudioConfig {
+  channel: number;
+  format: string;
+  sampleRate: number;
+}
+
+export interface TtsConfig {
+  audioConfig: RealTimeAudioConfig;
+}
+
+export interface DialogConfig {
+  dialogId?: string;
+  botName: string;
+  systemRole: string;
+  speakingStyle: string;
+  extra: Record<string, any>;
+}
+
+export interface StartSessionPayload {
+  tts: TtsConfig;
+  dialog: DialogConfig;
+}
+
+export interface SayHelloPayload {
+  content: string;
+}
+
+export interface ChatTtsTextPayload {
+  start: boolean;
+  end: boolean;
+  content: string;
+}
+
+export interface RealTimeSession {
+  sessionId: string;
+  createdAt: Date;
+  state: RealTimeConnectionState;
+  lastActiveAt?: Date;
+}
+
+export interface AudioVisualizationData {
+  frequencies: number[];
+  volume: number;
+  isRecording: boolean;
+  isPlaying: boolean;
+}
+
+export interface RealTimeCallState {
+  connectionState: RealTimeConnectionState;
+  session: RealTimeSession | null;
+  isRecording: boolean;
+  isPlaying: boolean;
+  audioVisualization: AudioVisualizationData;
+  error: string | null;
+  stats: Record<string, any>;
+}
+
+export interface RealTimeEventData {
+  type: 'connection' | 'audio' | 'dialog' | 'error';
+  data: any;
+  timestamp: Date;
+}
+
+// WebSocket消息类型
+export enum MessageType {
+  FullClient = 'full_client',
+  AudioOnlyClient = 'audio_only_client',
+  FullServer = 'full_server',
+  AudioOnlyServer = 'audio_only_server',
+  Error = 'error'
+}
+
+export interface ProtocolMessage {
+  type: MessageType;
+  sequence: number;
+  payload: Uint8Array;
+}
+
+export enum RealTimeEventType {
+  StartSession = 'start_session',
+  FinishSession = 'finish_session',
+  SayHello = 'say_hello',
+  ChatTtsText = 'chat_tts_text'
+}

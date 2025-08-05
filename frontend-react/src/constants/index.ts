@@ -50,29 +50,6 @@ export const DEFAULT_AUDIO_CONFIG: AudioConfig = {
   selectedVoice: '',
   
   // LLM配置
-  llmSettings: {
-    openai: {
-      baseUrl: 'https://api.openai.com/v1',
-      apiKey: '',
-      model: 'tts-1',
-      voice: 'alloy',
-      speed: 1.0,
-      pitch: 1.0,
-      volume: 0.5,
-    },
-    doubao: {
-      appId: '',
-      accessToken: '',
-      cluster: '',
-      endpoint: '',
-      audioEncoding: 'mp3',
-      speed: 1.0,
-      pitch: 1.0,
-      volume: 0.5,
-    },
-  },
-  
-  // 统一的LLM配置
   llmConfiguration: {
     openai: {
       baseUrl: 'https://api.openai.com/v1',
@@ -101,9 +78,6 @@ export const DEFAULT_AUDIO_CONFIG: AudioConfig = {
   previewAudioUrl: '',
   
   // 兼容性字段（保留以防向后兼容）
-  openaiBaseUrl: 'https://api.openai.com/v1',
-  openaiKey: '',
-  openaiModel: 'tts-1',
   superLong: false,
 };
 
@@ -116,6 +90,12 @@ export const API_ENDPOINTS = {
   // LLM语音端点
   OPENAI_TTS: '/api/openai-tts',
   DOUBAO_TTS: '/api/doubao-tts',
+  // 实时语音端点
+  REALTIME_CONNECT: '/api/realtime/connect',
+  REALTIME_DISCONNECT: '/api/realtime/disconnect',
+  REALTIME_START_SESSION: '/api/realtime/start-session',
+  REALTIME_FINISH_SESSION: '/api/realtime/finish-session',
+  REALTIME_DEMO: '/api/realtime/demo',
 } as const;
 
 // 音频格式
@@ -157,4 +137,62 @@ export const SUCCESS_MESSAGES = {
   GENERATION_COMPLETE: '语音生成完成',
   DOWNLOAD_COMPLETE: '下载完成',
   PREVIEW_READY: '预览准备就绪',
+  REALTIME_CONNECTED: '实时语音连接成功',
+  REALTIME_SESSION_STARTED: '语音会话已开始',
+  REALTIME_SESSION_ENDED: '语音会话已结束',
+} as const;
+
+// 实时语音配置
+export const REALTIME_CONFIG = {
+  // WebSocket配置
+  WEBSOCKET_URL: 'wss://openspeech.bytedance.com/api/v3/realtime/dialogue',
+  CONNECTION_TIMEOUT: 30000,
+  HEARTBEAT_INTERVAL: 30000,
+  
+  // 音频配置
+  AUDIO_BUFFER_SECONDS: 100,
+  INPUT_SAMPLE_RATE: 16000,
+  OUTPUT_SAMPLE_RATE: 24000,
+  AUDIO_FRAME_SIZE: 160,
+  
+  // 默认对话配置
+  DEFAULT_DIALOG: {
+    botName: '豆包',
+    systemRole: '你使用活泼灵动的女声，性格开朗，热爱生活。',
+    speakingStyle: '你的说话风格简洁明了，语速适中，语调自然。',
+    extra: {
+      strict_audit: false,
+      audit_response: '抱歉这个问题我无法回答，你可以换个其他话题，我会尽力为你提供帮助。'
+    }
+  },
+  
+  // 默认TTS配置
+  DEFAULT_TTS: {
+    audioConfig: {
+      channel: 1,
+      format: 'pcm',
+      sampleRate: 24000
+    }
+  },
+  
+  // 音频可视化配置
+  VISUALIZATION: {
+    FFT_SIZE: 256,
+    SMOOTHING_TIME_CONSTANT: 0.8,
+    MIN_DECIBELS: -90,
+    MAX_DECIBELS: -10,
+    UPDATE_INTERVAL: 16 // 60fps
+  }
+} as const;
+
+// 实时语音错误消息
+export const REALTIME_ERROR_MESSAGES = {
+  CONNECTION_FAILED: '连接实时语音服务失败',
+  WEBSOCKET_ERROR: 'WebSocket连接错误',
+  AUDIO_PERMISSION_DENIED: '麦克风权限被拒绝',
+  AUDIO_DEVICE_ERROR: '音频设备错误',
+  SESSION_START_FAILED: '开始语音会话失败',
+  SESSION_END_FAILED: '结束语音会话失败',
+  INVALID_CONFIG: '配置参数无效',
+  NETWORK_ERROR: '网络连接错误',
 } as const;

@@ -65,6 +65,10 @@ builder.Services.AddSingleton<EasyVoice.Core.Interfaces.Tts.ITtsEngineFactory, E
 builder.Services.AddSingleton<EasyVoice.Core.Interfaces.ITextService, EasyVoice.Core.Services.TextService>();
 builder.Services.AddScoped<EasyVoice.Core.Interfaces.ITtsService, EasyVoice.Core.Services.TtsService>();
 builder.Services.AddScoped<EasyVoice.Core.Interfaces.ILlmService, EasyVoice.Core.Services.LlmService>();
+builder.Services.AddScoped<EasyVoice.Core.Interfaces.IAnalysisTextService, EasyVoice.Core.Services.AnalysisTextService>();
+
+// Register Real-time service
+builder.Services.AddScoped<EasyVoice.Core.Interfaces.IRealTimeService, EasyVoice.Core.Services.DoubaoRealTimeService>();
 
 // Add controllers to the container.
 builder.Services.AddControllers();

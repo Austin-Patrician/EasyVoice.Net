@@ -21,7 +21,7 @@ const { Panel } = Collapse;
 // 演示语音段落数据
 const demoSegments: VoiceSegment[] = [
   {
-    voice: '欢迎使用EasyVoice，',
+    voice: '欢迎使用Vox，',
     start: 0,
     end: 2,
     avatar: 'https://trae-api-sg.mchost.guru/api/ide/v1/text_to_image?prompt=professional%20female%20avatar%20with%20blue%20theme&image_size=square',
@@ -90,10 +90,10 @@ const features = [
 const faqData = [
   {
     key: '1',
-    label: 'EasyVoice支持哪些语言？',
+    label: 'Vox支持哪些语言？',
     children: (
       <p className="text-gray-600">
-        EasyVoice支持中文（普通话）、英文、日文、韩文、法文、德文、西班牙文、意大利文、葡萄牙文、俄文等多种语言的语音合成。
+        Vox支持中文（普通话）、英文、日文、韩文、法文、德文、西班牙文、意大利文、葡萄牙文、俄文等多种语言的语音合成。
       </p>
     ),
   },
@@ -205,7 +205,7 @@ export const HomePage: React.FC = () => {
             </span>
           </Title>
           <Paragraph className="!text-xl !text-gray-600 !mb-8 max-w-3xl mx-auto">
-            EasyVoice是一个专业的AI语音合成平台，采用先进的人工智能技术，
+            Vox是一个专业的AI语音合成平台，采用先进的人工智能技术，
             将您的文字转换为自然流畅的语音。支持多种语言和音色，满足各种场景需求。
           </Paragraph>
           
@@ -301,7 +301,7 @@ export const HomePage: React.FC = () => {
         <div className="mx-auto max-w-7xl">
           <div className="text-center mb-16">
             <Title level={2} className="!mb-4">
-              为什么选择 EasyVoice？
+              为什么选择 Vox？
             </Title>
             <Paragraph className="!text-lg !text-gray-600 max-w-2xl mx-auto">
               我们提供业界领先的AI语音合成技术，为您带来卓越的语音体验
@@ -382,7 +382,7 @@ export const HomePage: React.FC = () => {
               常见问题
             </Title>
             <Paragraph className="!text-lg !text-gray-600">
-              解答您关于EasyVoice的疑问
+              解答您关于Vox的疑问
             </Paragraph>
           </div>
           
@@ -413,7 +413,7 @@ export const HomePage: React.FC = () => {
             准备开始了吗？
           </Title>
           <Paragraph className="!text-lg !text-gray-600 !mb-8">
-            立即体验EasyVoice的强大功能，让您的文字变成动听的声音
+            立即体验Vox的强大功能，让您的文字变成动听的声音
           </Paragraph>
           <Link to="/generate">
             <Button 

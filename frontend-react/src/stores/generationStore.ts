@@ -168,7 +168,7 @@ export const useGenerationStore = create<GenerationStoreState>()(
       },
     }),
     {
-      name: 'easy-voice-app-store',
+      name: 'audio-config-storage',
       // 只持久化音频列表，不持久化临时状态
       partialize: (state) => ({ 
         audioList: state.audioList.map(item => ({

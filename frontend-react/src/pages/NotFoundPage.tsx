@@ -86,10 +86,10 @@ export const NotFoundPage: React.FC = () => {
           </Paragraph>
           <Space wrap>
             <a 
-              href="mailto:support@easyvoice.com" 
+              href="mailto:support@vox.com" 
               className="text-blue-600 hover:text-blue-800 text-sm"
             >
-              support@easyvoice.com
+              support@vox.com
             </a>
             <span className="text-gray-300">|</span>
             <Link 

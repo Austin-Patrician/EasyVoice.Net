@@ -9,32 +9,32 @@ public enum AudioFormat
     /// <summary>
     /// MP3 格式 - 压缩音频格式，文件小，兼容性好
     /// </summary>
-    Mp3,
+    Mp3 = 1,
 
     /// <summary>
     /// WAV 格式 - 无损音频格式，音质高，文件大
     /// </summary>
-    Wav,
+    Wav = 2,
 
     /// <summary>
     /// OGG 格式 - 开源压缩音频格式
     /// </summary>
-    Ogg,
+    Ogg = 3,
 
     /// <summary>
     /// FLAC 格式 - 无损压缩音频格式
     /// </summary>
-    Flac,
+    Flac = 4,
 
     /// <summary>
     /// PCM 格式 - 原始音频数据格式
     /// </summary>
-    Pcm,
+    Pcm = 5,
 
     /// <summary>
     /// Opus 格式 - 低延迟音频编码格式
     /// </summary>
-    Opus
+    Opus = 6
 }
 
 /// <summary>

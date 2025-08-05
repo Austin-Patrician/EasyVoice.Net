@@ -3,7 +3,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { Layout } from './components/Layout';
-import { HomePage, GeneratePage, AboutPage, NotFoundPage } from './pages';
+import { HomePage, GeneratePage, AboutPage, NotFoundPage, RealTimePage } from './pages';
 
 // Antd主题配置
 const theme = {
@@ -20,11 +20,12 @@ function App() {
       <Router>
         <Layout>
           <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/generate" element={<GeneratePage />} />
-            <Route path="/about" element={<AboutPage />} />
-            <Route path="*" element={<NotFoundPage />} />
-          </Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/generate" element={<GeneratePage />} />
+          <Route path="/realtime" element={<RealTimePage />} />
+          <Route path="/about" element={<AboutPage />} />
+          <Route path="*" element={<NotFoundPage />} />
+        </Routes>
         </Layout>
       </Router>
     </ConfigProvider>

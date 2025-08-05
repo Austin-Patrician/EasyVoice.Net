@@ -54,7 +54,7 @@ export const GeneratePage: React.FC = () => {
     updateConfig: updateAudioConfig,
     updateVoiceMode,
     updateLLMProvider,
-    updateLLMSettings,
+    updateLLMConfiguration,
     setVoices: loadVoices,
     isLoadingVoices,
     error,
@@ -94,8 +94,8 @@ export const GeneratePage: React.FC = () => {
     }
 
     if (audioConfig.voiceMode === 'llm') {
-      const llmConfig = audioConfig.llmSettings[audioConfig.llmProvider];
-      if (!llmConfig || (audioConfig.llmProvider === 'openai' && !(llmConfig as any).apiKey)) {
+      const llmConfig = audioConfig.llmConfiguration[audioConfig.llmProvider];
+      if (!llmConfig || (audioConfig.llmProvider === 'openai' && !(llmConfig as import('../types').OpenAIConfig).apiKey)) {
         message.warning('请先配置 LLM 参数');
         setSettingsModalOpen(true);
         return;
@@ -126,7 +126,7 @@ export const GeneratePage: React.FC = () => {
           gender: audioConfig.selectedGender,
         } : {
           llmProvider: audioConfig.llmProvider,
-          llmConfig: audioConfig.llmSettings[audioConfig.llmProvider],
+          llmConfig: audioConfig.llmConfiguration[audioConfig.llmProvider],
         }),
       };
 
@@ -337,7 +337,7 @@ export const GeneratePage: React.FC = () => {
                     <div className="grid grid-cols-2 gap-3">
                       <Radio.Button
                         value="edge"
-                        className="h-16 flex items-center justify-center text-center border-2 hover:border-blue-400"
+                        className="h-24 flex items-center justify-center text-center border-2 hover:border-blue-400"
                       >
                         <div className="flex flex-col items-center space-y-1">
                           <Cpu className="w-5 h-5" />
@@ -347,7 +347,7 @@ export const GeneratePage: React.FC = () => {
                       </Radio.Button>
                       <Radio.Button
                         value="llm"
-                        className="h-16 flex items-center justify-center text-center border-2 hover:border-purple-400"
+                        className="h-24 flex items-center justify-center text-center border-2 hover:border-purple-400"
                       >
                         <div className="flex flex-col items-center space-y-1">
                           <Zap className="w-5 h-5" />
@@ -569,9 +569,9 @@ export const GeneratePage: React.FC = () => {
          <SettingsModal
            open={settingsModalOpen}
            onClose={() => setSettingsModalOpen(false)}
-           llmSettings={audioConfig.llmSettings}
-           onSave={(settings) => {
-             updateLLMSettings(settings);
+           llmConfiguration={audioConfig.llmConfiguration}
+           onSave={(provider, config) => {
+             updateLLMConfiguration(provider as LLMProvider, config);
              setSettingsModalOpen(false);
            }}
          />

@@ -6,6 +6,7 @@ import { Button } from 'antd';
 const navigation = [
   { name: '首页', href: '/' },
   { name: '语音生成', href: '/generate' },
+  { name: '实时语音', href: '/realtime' },
   { name: '关于', href: '/about' },
 ];
 
@@ -31,7 +32,7 @@ export const Header: React.FC = () => {
                 <Volume2 className="h-5 w-5 text-white" />
               </div>
               <span className="text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                EasyVoice
+                Vox
               </span>
             </Link>
           </div>

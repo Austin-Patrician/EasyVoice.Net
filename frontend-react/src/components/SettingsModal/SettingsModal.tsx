@@ -16,7 +16,7 @@ import {
 } from 'antd';
 import { Settings, Key, Globe, Zap } from 'lucide-react';
 import { useAudioConfigStore } from '../../stores/audioConfigStore';
-import type { LLMSettings } from '../../types';
+import type { LLMConfiguration, LLMProvider } from '../../types';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -25,25 +25,21 @@ const { TabPane } = Tabs;
 interface SettingsModalProps {
   open: boolean;
   onClose: () => void;
-  llmSettings: LLMSettings;
-  onSave: (settings: LLMSettings) => void;
+  llmConfiguration: LLMConfiguration;
+  onSave: (provider: string, config: any) => void;
 }
 
-export const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose, llmSettings, onSave }) => {
+export const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose, llmConfiguration, onSave }) => {
   const [form] = Form.useForm();
   const [activeTab, setActiveTab] = useState('openai');
   const { updateLLMConfiguration } = useAudioConfigStore();
 
   const handleSave = () => {
-    form.validateFields().then((values) => {
-      const updatedSettings = {
-        ...llmSettings,
-        [activeTab]: values,
-      };
-      onSave(updatedSettings);
-      // 更新统一的LLM配置
-      updateLLMConfiguration();
-    });
+    // 移除required验证，允许保存空配置
+    const values = form.getFieldsValue();
+    onSave(activeTab, values);
+    // 更新统一的LLM配置
+    updateLLMConfiguration(activeTab as LLMProvider, values);
   };
 
   const handleCancel = () => {
@@ -100,16 +96,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose, llm
             <Form
               form={form}
               layout="vertical"
-              initialValues={llmSettings?.openai || {}}
+              initialValues={llmConfiguration?.openai || {}}
               className="space-y-4"
             >
               <Form.Item
                 label="Base URL"
                 name="baseUrl"
-                rules={[
-                  { required: true, message: '请输入 Base URL' },
-                  { type: 'url', message: '请输入有效的 URL' },
-                ]}
               >
                 <Input
                   placeholder="https://api.openai.com/v1"
@@ -120,7 +112,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose, llm
               <Form.Item
                 label="API Key"
                 name="apiKey"
-                rules={[{ required: true, message: '请输入 API Key' }]}
               >
                 <Input.Password
                   placeholder="sk-..."
@@ -131,7 +122,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose, llm
               <Form.Item
                 label="模型"
                 name="model"
-                rules={[{ required: true, message: '请选择模型' }]}
               >
                 <Select placeholder="选择 OpenAI 模型">
                   <Option value="tts-1">TTS-1 (标准)</Option>
@@ -142,7 +132,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose, llm
               <Form.Item
                 label="语音"
                 name="voice"
-                rules={[{ required: true, message: '请选择语音' }]}
               >
                 <Select placeholder="选择语音">
                   <Option value="alloy">Alloy</Option>
@@ -227,13 +216,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose, llm
             <Form
               form={form}
               layout="vertical"
-              initialValues={llmSettings?.doubao || {}}
+              initialValues={llmConfiguration?.doubao || {}}
               className="space-y-4"
             >
               <Form.Item
                 label="App ID"
                 name="appId"
-                rules={[{ required: true, message: '请输入 App ID' }]}
               >
                 <Input placeholder="输入豆包 App ID" />
               </Form.Item>
@@ -241,7 +229,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose, llm
               <Form.Item
                 label="Access Token"
                 name="accessToken"
-                rules={[{ required: true, message: '请输入 Access Token' }]}
               >
                 <Input.Password
                   placeholder="输入 Access Token"
@@ -252,7 +239,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose, llm
               <Form.Item
                 label="Cluster"
                 name="cluster"
-                rules={[{ required: true, message: '请输入 Cluster' }]}
               >
                 <Input placeholder="输入 Cluster" />
               </Form.Item>
@@ -260,10 +246,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose, llm
               <Form.Item
                 label="Endpoint"
                 name="endpoint"
-                rules={[
-                  { required: true, message: '请输入 Endpoint' },
-                  { type: 'url', message: '请输入有效的 URL' },
-                ]}
               >
                 <Input
                   placeholder="https://..."
@@ -274,7 +256,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose, llm
               <Form.Item
                 label="音频编码"
                 name="audioEncoding"
-                rules={[{ required: true, message: '请选择音频编码' }]}
               >
                 <Select placeholder="选择音频编码格式">
                   <Option value="mp3">MP3</Option>

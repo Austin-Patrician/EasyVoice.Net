@@ -28,7 +28,7 @@ const socialLinks = [
   },
   {
     name: 'Email',
-    href: 'mailto:contact@easyvoice.com',
+    href: 'mailto:contact@Vox.com',
     icon: Mail,
   },
 ];
@@ -45,7 +45,7 @@ export const Footer: React.FC = () => {
                 <Volume2 className="h-5 w-5 text-white" />
               </div>
               <span className="text-xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-                EasyVoice
+                Vox
               </span>
             </div>
             <p className="text-gray-400 text-sm mb-4">
@@ -132,10 +132,10 @@ export const Footer: React.FC = () => {
         <div className="mt-8 pt-8 border-t border-gray-800">
           <div className="flex flex-col md:flex-row justify-between items-center">
             <p className="text-gray-400 text-sm">
-              &copy; {new Date().getFullYear()} EasyVoice. 保留所有权利。
+              &copy; {new Date().getFullYear()} Vox. 保留所有权利。
             </p>
             <p className="text-gray-400 text-sm mt-2 md:mt-0 flex items-center">
-              Made with <Heart className="h-4 w-4 text-red-500 mx-1" /> by EasyVoice Team
+              Made with <Heart className="h-4 w-4 text-red-500 mx-1" /> by Vox Team
             </p>
           </div>
         </div>

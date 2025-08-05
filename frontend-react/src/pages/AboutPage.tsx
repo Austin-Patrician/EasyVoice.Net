@@ -50,7 +50,7 @@ const milestones = [
   {
     time: '2024年1月',
     title: '项目启动',
-    description: 'EasyVoice项目正式启动，开始技术调研和产品规划',
+    description: 'Vox项目正式启动，开始技术调研和产品规划',
   },
   {
     time: '2024年3月',
@@ -60,7 +60,7 @@ const milestones = [
   {
     time: '2024年6月',
     title: '产品发布',
-    description: '正式发布EasyVoice平台，支持多语言语音合成',
+    description: '正式发布Vox平台，支持多语言语音合成',
   },
   {
     time: '2024年9月',
@@ -114,10 +114,10 @@ export const AboutPage: React.FC = () => {
             </div>
           </div>
           <Title level={1} className="!mb-6">
-            关于 EasyVoice
+            关于 Vox
           </Title>
           <Paragraph className="!text-xl !text-gray-600 max-w-3xl mx-auto">
-            EasyVoice是一个专业的AI语音合成平台，致力于为用户提供高质量、自然流畅的语音生成服务。
+            Vox是一个专业的AI语音合成平台，致力于为用户提供高质量、自然流畅的语音生成服务。
             我们相信技术的力量能够让沟通变得更加便捷和美好。
           </Paragraph>
         </div>
@@ -326,14 +326,14 @@ export const AboutPage: React.FC = () => {
                   type="primary" 
                   size="large" 
                   icon={<Mail className="w-5 h-5" />}
-                  href="mailto:contact@easyvoice.com"
+                  href="mailto:contact@vox.com"
                 >
                   发送邮件
                 </Button>
                 <Button 
                   size="large" 
                   icon={<Github className="w-5 h-5" />}
-                  href="https://github.com/easyvoice"
+                  href="https://github.com/vox"
                   target="_blank"
                 >
                   GitHub
@@ -350,7 +350,7 @@ export const AboutPage: React.FC = () => {
               
               <div className="mt-8 pt-6 border-t border-gray-200">
                 <Paragraph className="!text-gray-500 !mb-0 flex items-center justify-center">
-                  Made with <Heart className="w-4 h-4 text-red-500 mx-2" /> by EasyVoice Team
+                  Made with <Heart className="w-4 h-4 text-red-500 mx-2" /> by Vox Team
                 </Paragraph>
               </div>
             </div>
