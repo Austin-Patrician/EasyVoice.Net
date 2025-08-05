@@ -69,10 +69,15 @@ builder.Services.AddScoped<EasyVoice.Core.Interfaces.IAnalysisTextService, EasyV
 
 // Register Real-time service
 builder.Services.AddScoped<EasyVoice.Core.Interfaces.IRealTimeService, EasyVoice.Core.Services.DoubaoRealTimeService>();
-
+builder.Services.AddMemoryCache();
 // Add controllers to the container.
 builder.Services.AddControllers();
-
+builder.Services.AddCors(_=> _.AddDefaultPolicy(policy =>
+{
+    policy.AllowAnyOrigin()
+          .AllowAnyHeader()
+          .AllowAnyMethod();
+}));
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -86,6 +91,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+app.UseCors();
 app.UseHttpsRedirection();
 
 app.UseAuthorization();

@@ -91,6 +91,20 @@ export const API_ENDPOINTS = {
   OPENAI_TTS: '/api/openai-tts',
   DOUBAO_TTS: '/api/doubao-tts',
   // 实时语音端点
+  REALTIME: {
+    CREATE_SESSION: '/api/realtime/session/create',
+    START_SESSION: '/api/realtime/session/{sessionId}/start',
+    GET_SESSION_STATUS: '/api/realtime/session/{sessionId}/status',
+    GET_STATUS: '/api/realtime/session/{sessionId}/status',
+    FINISH_SESSION: '/api/realtime/session/{sessionId}/finish',
+    SAY_HELLO: '/api/realtime/session/{sessionId}/hello',
+    START_RECORDING: '/api/realtime/session/{sessionId}/audio/start-recording',
+    STOP_RECORDING: '/api/realtime/session/{sessionId}/audio/stop-recording',
+    START_PLAYBACK: '/api/realtime/session/{sessionId}/audio/start-playback',
+    STOP_PLAYBACK: '/api/realtime/session/{sessionId}/audio/stop-playback',
+    WEBSOCKET: '/api/realtime/session/{sessionId}/websocket'
+  },
+  // 兼容性端点（保留旧的端点）
   REALTIME_CONNECT: '/api/realtime/connect',
   REALTIME_DISCONNECT: '/api/realtime/disconnect',
   REALTIME_START_SESSION: '/api/realtime/start-session',
@@ -144,8 +158,7 @@ export const SUCCESS_MESSAGES = {
 
 // 实时语音配置
 export const REALTIME_CONFIG = {
-  // WebSocket配置
-  WEBSOCKET_URL: 'wss://openspeech.bytedance.com/api/v3/realtime/dialogue',
+  // WebSocket配置 - 注意：WebSocket URL现在由RealTimeApiService动态构建
   CONNECTION_TIMEOUT: 30000,
   HEARTBEAT_INTERVAL: 30000,
   

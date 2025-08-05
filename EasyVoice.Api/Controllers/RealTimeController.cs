@@ -1,9 +1,11 @@
 using EasyVoice.Core.Interfaces;
 using EasyVoice.Core.Models;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Memory;
 using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text;
+using System.Text.Json;
 
 namespace EasyVoice.Api.Controllers;
 
@@ -16,12 +18,18 @@ public class RealTimeController : ControllerBase
 {
     private readonly IRealTimeService _realTimeService;
     private readonly ILogger<RealTimeController> _logger;
+    private readonly IMemoryCache _sessionCache;
     private static readonly ConcurrentDictionary<string, IRealTimeService> ActiveSessions = new();
     private string? _currentSessionId;
-    public RealTimeController(IRealTimeService realTimeService, ILogger<RealTimeController> logger)
+    
+    public RealTimeController(
+        IRealTimeService realTimeService, 
+        ILogger<RealTimeController> logger,
+        IMemoryCache sessionCache)
     {
         _realTimeService = realTimeService;
         _logger = logger;
+        _sessionCache = sessionCache;
     }
     
     
@@ -154,12 +162,56 @@ public class RealTimeController : ControllerBase
             var sessionId = Guid.NewGuid().ToString();
             var config = new RealTimeConnectionConfig
             {
-                AppId = request.AppId,
-                AccessToken = request.AccessToken,
+                AppId = "7482136989",
+                AccessToken = "4akGrrTRlikgCCxBVSi0f3gXQ2uGR8bt",
                 WebSocketUrl = request.WebSocketUrl ?? "wss://openspeech.bytedance.com/api/v3/realtime/dialogue",
                 ConnectionTimeoutMs = request.ConnectionTimeoutMs ?? 30000,
                 AudioBufferSeconds = request.AudioBufferSeconds ?? 100
             };
+
+            // 缓存会话配置
+            _sessionCache.Set(sessionId, config, TimeSpan.FromHours(1));
+            
+            // 创建会话信息
+            var sessionInfo = new SessionInfo
+            {
+                SessionId = sessionId,
+                CreatedAt = DateTime.UtcNow,
+                State = RealTimeDialogState.Disconnected
+            };
+            _sessionCache.Set($"session_info_{sessionId}", sessionInfo, TimeSpan.FromHours(1));
+            
+            _logger.LogInformation("会话创建成功: {SessionId}", sessionId);
+            
+            return Ok(new CreateSessionResponse
+            {
+                SessionId = sessionId,
+                Status = "created",
+                Message = "会话创建成功"
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "创建会话失败");
+            return BadRequest(new { error = "创建会话失败", details = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 启动会话连接
+    /// </summary>
+    /// <param name="sessionId">会话ID</param>
+    /// <param name="request">会话配置</param>
+    /// <returns>操作结果</returns>
+    [HttpPost("session/{sessionId}/start")]
+    public async Task<IActionResult> StartSession(string sessionId, [FromBody] StartSessionRequest request)
+    {
+        try
+        {
+            if (!_sessionCache.TryGetValue(sessionId, out RealTimeConnectionConfig? config))
+            {
+                return NotFound(new { error = "会话不存在" });
+            }
 
             // 创建新的服务实例
             var serviceProvider = HttpContext.RequestServices;
@@ -175,51 +227,25 @@ public class RealTimeController : ControllerBase
                 return BadRequest(new { error = "连接失败" });
             }
 
-            // 保存会话
-            ActiveSessions[sessionId] = realTimeService;
-
-            _logger.LogInformation("创建实时对话会话: {SessionId}", sessionId);
-
-            return Ok(new
+            var tts = new AudioConfig()
             {
-                sessionId,
-                status = "connected",
-                message = "会话创建成功"
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "创建实时对话会话时发生错误");
-            return StatusCode(500, new { error = "创建会话失败", details = ex.Message });
-        }
-    }
-
-    /// <summary>
-    /// 开始对话会话
-    /// </summary>
-    /// <param name="sessionId">会话ID</param>
-    /// <param name="request">会话配置</param>
-    /// <returns>操作结果</returns>
-    [HttpPost("session/{sessionId}/start")]
-    public async Task<IActionResult> StartSession(string sessionId, [FromBody] StartSessionRequest request)
-    {
-        try
-        {
-            if (!ActiveSessions.TryGetValue(sessionId, out var service))
+                Channel = 1,
+                Format = "pcm",
+                SampleRate = 24000
+            };
+            if (request.AudioConfig is not null)
             {
-                return NotFound(new { error = "会话不存在" });
+                tts.Channel = request.AudioConfig.Channel ?? 1;
+                tts.Format = request.AudioConfig.Format ?? "pcm";
+                tts.SampleRate = request.AudioConfig.SampleRate ?? 24000;
             }
-
+            
+            // 启动会话
             var payload = new StartSessionPayload
             {
                 Tts = new TtsConfig
                 {
-                    AudioConfig = new AudioConfig
-                    {
-                        Channel = request.AudioConfig?.Channel ?? 1,
-                        Format = request.AudioConfig?.Format ?? "pcm",
-                        SampleRate = request.AudioConfig?.SampleRate ?? 24000
-                    }
+                    AudioConfig = tts
                 },
                 Dialog = new DialogConfig
                 {
@@ -229,25 +255,31 @@ public class RealTimeController : ControllerBase
                 }
             };
 
-            var started = await service.StartSessionAsync(sessionId, payload);
+            var started = await realTimeService.StartSessionAsync(sessionId, payload);
             if (!started)
             {
                 return BadRequest(new { error = "启动会话失败" });
             }
 
-            _logger.LogInformation("启动对话会话: {SessionId}", sessionId);
-
-            return Ok(new
+            // 保存会话服务实例
+            ActiveSessions[sessionId] = realTimeService;
+            
+            // 更新会话状态
+            if (_sessionCache.TryGetValue($"session_info_{sessionId}", out SessionInfo? sessionInfo))
             {
-                sessionId,
-                status = "started",
-                message = "会话启动成功"
-            });
+                sessionInfo.State = RealTimeDialogState.Connected;
+                sessionInfo.LastActiveAt = DateTime.UtcNow;
+                _sessionCache.Set($"session_info_{sessionId}", sessionInfo, TimeSpan.FromHours(1));
+            }
+            
+            _logger.LogInformation("会话启动成功: {SessionId}", sessionId);
+            
+            return Ok(new { status = "started", message = "会话启动成功" });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "启动对话会话时发生错误: {SessionId}", sessionId);
-            return StatusCode(500, new { error = "启动会话失败", details = ex.Message });
+            _logger.LogError(ex, "启动会话失败: {SessionId}", sessionId);
+            return BadRequest(new { error = "启动会话失败", details = ex.Message });
         }
     }
 
@@ -432,17 +464,36 @@ public class RealTimeController : ControllerBase
     {
         try
         {
-            if (!ActiveSessions.TryGetValue(sessionId, out var service))
+            // 检查会话是否存在
+            if (!_sessionCache.TryGetValue($"session_info_{sessionId}", out SessionInfo? sessionInfo))
             {
                 return NotFound(new { error = "会话不存在" });
             }
 
-            await service.FinishSessionAsync(sessionId);
-            await service.DisconnectAsync();
-            service.Dispose();
+            // 如果有活跃的服务实例，先结束会话
+            if (ActiveSessions.TryGetValue(sessionId, out var service))
+            {
+                try
+                {
+                    await service.FinishSessionAsync(sessionId);
+                    await service.DisconnectAsync();
+                    service.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "结束服务实例时发生错误: {SessionId}", sessionId);
+                }
+                finally
+                {
+                    ActiveSessions.TryRemove(sessionId, out _);
+                }
+            }
 
-            ActiveSessions.TryRemove(sessionId, out _);
-            _logger.LogInformation("结束对话会话: {SessionId}", sessionId);
+            // 清理缓存
+            _sessionCache.Remove(sessionId);
+            _sessionCache.Remove($"session_info_{sessionId}");
+
+            _logger.LogInformation("会话结束成功: {SessionId}", sessionId);
 
             return Ok(new
             {
@@ -464,29 +515,30 @@ public class RealTimeController : ControllerBase
     /// <param name="sessionId">会话ID</param>
     /// <returns>会话状态</returns>
     [HttpGet("session/{sessionId}/status")]
-    public async Task<IActionResult> GetSessionStatus(string sessionId)
+    public IActionResult GetSessionStatus(string sessionId)
     {
         try
         {
-            if (!ActiveSessions.TryGetValue(sessionId, out var service))
+            if (!_sessionCache.TryGetValue($"session_info_{sessionId}", out SessionInfo? sessionInfo))
             {
                 return NotFound(new { error = "会话不存在" });
             }
 
-            var stats = await service.GetConnectionStatsAsync();
-
-            return Ok(new
+            var status = new SessionStatusResponse
             {
-                sessionId,
-                connectionState = service.ConnectionState.ToString(),
-                currentSession = service.CurrentSession,
-                stats
-            });
+                SessionId = sessionId,
+                State = sessionInfo.State.ToString(),
+                CreatedAt = sessionInfo.CreatedAt,
+                LastActiveAt = sessionInfo.LastActiveAt,
+                IsConnected = sessionInfo.State == RealTimeDialogState.Connected || sessionInfo.State == RealTimeDialogState.InSession
+            };
+
+            return Ok(status);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "获取会话状态时发生错误: {SessionId}", sessionId);
-            return StatusCode(500, new { error = "获取状态失败", details = ex.Message });
+            _logger.LogError(ex, "获取会话状态失败: {SessionId}", sessionId);
+            return BadRequest(new { error = "获取会话状态失败", details = ex.Message });
         }
     }
 
@@ -671,6 +723,129 @@ public class SayHelloRequest
     /// 问候内容
     /// </summary>
     public string Content { get; set; } = string.Empty;
+}
+
+#endregion
+
+#region Response Models
+
+/// <summary>
+/// 创建会话响应
+/// </summary>
+public class CreateSessionResponse
+{
+    /// <summary>
+    /// 会话ID
+    /// </summary>
+    public string SessionId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 状态
+    /// </summary>
+    public string Status { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 消息
+    /// </summary>
+    public string Message { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// 会话信息
+/// </summary>
+public class SessionInfo
+{
+    /// <summary>
+    /// 会话ID
+    /// </summary>
+    public string SessionId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 会话状态
+    /// </summary>
+    public RealTimeDialogState State { get; set; }
+
+    /// <summary>
+    /// 创建时间
+    /// </summary>
+    public DateTime CreatedAt { get; set; }
+
+    /// <summary>
+    /// 最后活跃时间
+    /// </summary>
+    public DateTime LastActiveAt { get; set; }
+}
+
+/// <summary>
+/// 会话状态响应
+/// </summary>
+public class SessionStatusResponse
+{
+    /// <summary>
+    /// 会话ID
+    /// </summary>
+    public string SessionId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 状态
+    /// </summary>
+    public string State { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 创建时间
+    /// </summary>
+    public DateTime CreatedAt { get; set; }
+
+    /// <summary>
+    /// 最后活跃时间
+    /// </summary>
+    public DateTime LastActiveAt { get; set; }
+
+    /// <summary>
+    /// 是否已连接
+    /// </summary>
+    public bool IsConnected { get; set; }
+}
+
+/// <summary>
+/// 实时对话状态枚举
+/// </summary>
+public enum RealTimeDialogState
+{
+    /// <summary>
+    /// 已创建
+    /// </summary>
+    Created,
+
+    /// <summary>
+    /// 连接中
+    /// </summary>
+    Connecting,
+
+    /// <summary>
+    /// 已连接
+    /// </summary>
+    Connected,
+
+    /// <summary>
+    /// 会话中
+    /// </summary>
+    InSession,
+
+    /// <summary>
+    /// 断开连接中
+    /// </summary>
+    Disconnecting,
+
+    /// <summary>
+    /// 已断开
+    /// </summary>
+    Disconnected,
+
+    /// <summary>
+    /// 错误状态
+    /// </summary>
+    Error
 }
 
 #endregion

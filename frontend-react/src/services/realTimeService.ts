@@ -91,7 +91,7 @@ export class RealTimeService {
 
     try {
       // 构建WebSocket URL和headers
-      const wsUrl = new URL(REALTIME_CONFIG.WEBSOCKET_URL);
+      const wsUrl = new URL('wss://openspeech.bytedance.com/api/v3/realtime/dialogue');
       
       // 创建WebSocket连接
       this.ws = new WebSocket(wsUrl.toString());
@@ -319,7 +319,7 @@ export class RealTimeService {
 // 创建默认实例的工厂函数
 export function createRealTimeService(config?: Partial<RealTimeConfig>): RealTimeService {
   const defaultConfig: RealTimeConfig = {
-    webSocketUrl: REALTIME_CONFIG.WEBSOCKET_URL,
+    webSocketUrl: 'wss://openspeech.bytedance.com/api/v3/realtime/dialogue',
     appId: '', // 需要从环境变量或配置中获取
     accessToken: '', // 需要从环境变量或配置中获取
     inputSampleRate: REALTIME_CONFIG.INPUT_SAMPLE_RATE,

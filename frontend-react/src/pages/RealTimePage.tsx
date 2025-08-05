@@ -8,11 +8,13 @@ import {
   SettingOutlined,
   SoundOutlined
 } from '@ant-design/icons';
-import { RealTimeService, createRealTimeService } from '../services/realTimeService';
+import { RealTimeApiService } from '../services/realTimeApiService';
 import { audioService, AudioDeviceInfo, AudioPermissions } from '../services/audioService';
+import { configService } from '../services/configService';
 import { 
   RealTimeConnectionState, 
-  RealTimeConfig,
+  CreateSessionRequest,
+  StartSessionRequest,
   AudioVisualizationData,
   VoiceMode 
 } from '../types';
@@ -75,7 +77,7 @@ const RealTimePage: React.FC = () => {
   const [retryCount, setRetryCount] = useState(0);
   
   // Refs
-  const realTimeServiceRef = useRef<RealTimeService | null>(null);
+  const realTimeApiServiceRef = useRef<RealTimeApiService | null>(null);
   const callTimerRef = useRef<NodeJS.Timeout | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
@@ -118,6 +120,9 @@ const RealTimePage: React.FC = () => {
   const initializeServices = async () => {
     await performOperation(
       async () => {
+        // 初始化配置服务
+        await configService.initialize();
+        
         // 请求音频权限
         const permissions = await audioService.requestPermissions();
         setAudioPermissions(permissions);
@@ -147,18 +152,9 @@ const RealTimePage: React.FC = () => {
         // 设置音频事件监听器
         setupAudioEventListeners();
         
-        // 创建实时语音服务
-        const config: RealTimeConfig = {
-          webSocketUrl: REALTIME_CONFIG.WEBSOCKET_URL,
-          appId: 'your-app-id', // 需要从配置中获取
-          accessToken: 'your-access-token', // 需要从配置中获取
-          inputSampleRate: REALTIME_CONFIG.INPUT_SAMPLE_RATE,
-           outputSampleRate: REALTIME_CONFIG.OUTPUT_SAMPLE_RATE,
-           connectionTimeoutMs: 30000,
-           heartbeatIntervalMs: 30000
-        };
-        
-        realTimeServiceRef.current = createRealTimeService(config);
+        // 创建实时语音API服务
+        const config = configService.getAppConfig();
+        realTimeApiServiceRef.current = new RealTimeApiService(config.apiBaseUrl);
         setupRealTimeEventListeners();
         
         showSuccess('音频服务初始化成功');
@@ -195,11 +191,11 @@ const RealTimePage: React.FC = () => {
     });
     
     audioService.addEventListener('audioData', async (blob: Blob) => {
-      if (realTimeServiceRef.current && realTimeServiceRef.current.isConnected()) {
+      if (realTimeApiServiceRef.current && realTimeApiServiceRef.current.isWebSocketConnected()) {
         try {
           const arrayBuffer = await audioService.convertBlobToArrayBuffer(blob);
           const pcmData = await audioService.convertAudioToPCM(arrayBuffer);
-          realTimeServiceRef.current.sendBinaryData(pcmData);
+          realTimeApiServiceRef.current.sendAudioData(pcmData);
         } catch (error) {
           console.error('发送音频数据失败:', error);
         }
@@ -212,9 +208,10 @@ const RealTimePage: React.FC = () => {
   };
   
   const setupRealTimeEventListeners = () => {
-    if (!realTimeServiceRef.current) return;
+    if (!realTimeApiServiceRef.current) return;
     
-    realTimeServiceRef.current.addEventListener('connectionStateChange', (state: RealTimeConnectionState) => {
+    realTimeApiServiceRef.current.addEventListener('connectionStateChanged', (event: any) => {
+      const state = event.newState;
       setConnectionState(state);
       setCallState(prev => ({
         ...prev,
@@ -223,38 +220,64 @@ const RealTimePage: React.FC = () => {
       }));
     });
     
-    realTimeServiceRef.current.addEventListener('sessionStarted', () => {
+    realTimeApiServiceRef.current.addEventListener('sessionStarted', () => {
       setCallState(prev => ({ ...prev, isInCall: true }));
     });
     
-    realTimeServiceRef.current.addEventListener('sessionEnded', () => {
+    realTimeApiServiceRef.current.addEventListener('sessionEnded', () => {
       setCallState(prev => ({ ...prev, isInCall: false }));
     });
     
-    realTimeServiceRef.current.addEventListener('audioData', async (audioData: ArrayBuffer) => {
+    realTimeApiServiceRef.current.addEventListener('audioData', async (audioEvent: any) => {
       try {
-        await audioService.playAudioData(audioData);
+        await audioService.playAudioData(audioEvent.data);
       } catch (error) {
         console.error('播放音频失败:', error);
       }
     });
     
-    realTimeServiceRef.current.addEventListener('error', (error: Error) => {
-      setError(error.message);
+    realTimeApiServiceRef.current.addEventListener('error', (error: any) => {
+      setError(error.message || '发生未知错误');
     });
   };
   
   const handleStartCall = async () => {
-    if (!realTimeServiceRef.current || !audioPermissions.microphone) {
+    if (!realTimeApiServiceRef.current || !audioPermissions.microphone) {
       setError(REALTIME_ERROR_MESSAGES.AUDIO_PERMISSION_DENIED);
       return;
     }
-    
+
     await performOperation(
       async () => {
-        // 连接WebSocket
+        // 1. 创建会话
+        const config = configService.getConfig();
+        const createSessionRequest: CreateSessionRequest = {
+          appId: config.app.appId,
+          accessToken: config.app.accessToken,
+          webSocketUrl: config.app.webSocketUrl,
+          connectionTimeoutMs: config.app.connectionTimeoutMs,
+          audioBufferSeconds: config.app.audioBufferSeconds
+        };
+        
+        const sessionResponse = await realTimeApiServiceRef.current!.createSession(createSessionRequest);
+        
+        // 2. 启动会话
+        const startSessionRequest: StartSessionRequest = {
+          botName: config.app.botName,
+          systemRole: config.app.systemRole,
+          speakingStyle: config.app.speakingStyle,
+          audioConfig: {
+            channel: config.audio.defaultChannels,
+            format: config.audio.defaultFormat,
+            sampleRate: config.audio.defaultSampleRate
+          }
+        };
+        
+        await realTimeApiServiceRef.current!.startSession(sessionResponse.sessionId, startSessionRequest);
+        
+        // 3. 连接WebSocket
         await withRetry(
-          () => realTimeServiceRef.current!.connect(),
+          () => realTimeApiServiceRef.current!.connectWebSocket(sessionResponse.sessionId),
           {
             maxAttempts: 3,
             delay: 2000,
@@ -266,24 +289,12 @@ const RealTimePage: React.FC = () => {
           'websocket-connect'
         );
         
-        // 开始会话
-        await realTimeServiceRef.current!.startSession({
-          dialog: REALTIME_CONFIG.DEFAULT_DIALOG,
-          tts: {
-            audioConfig: {
-              channel: 1,
-              format: 'pcm',
-              sampleRate: 24000
-            }
-          }
+        // 5. 发送问候
+        await realTimeApiServiceRef.current!.sayHello(sessionResponse.sessionId, {
+          content: config.app.greetingMessage
         });
         
-        // 发送问候
-        await realTimeServiceRef.current!.sayHello({
-          content: '你好，我想开始语音对话。'
-        });
-        
-        // 开始录音
+        // 5. 开始录音
         await audioService.startRecording();
       },
       {
@@ -305,9 +316,9 @@ const RealTimePage: React.FC = () => {
         audioService.stopRecording();
         
         // 结束会话
-        if (realTimeServiceRef.current) {
-          await realTimeServiceRef.current.finishSession();
-          realTimeServiceRef.current.disconnect();
+        if (realTimeApiServiceRef.current && realTimeApiServiceRef.current.getSessionId()) {
+          await realTimeApiServiceRef.current.finishSession(realTimeApiServiceRef.current.getSessionId()!);
+          realTimeApiServiceRef.current.disconnectWebSocket();
         }
         
         // 重置重试计数
@@ -388,8 +399,8 @@ const RealTimePage: React.FC = () => {
     
     audioService.cleanup();
     
-    if (realTimeServiceRef.current) {
-      realTimeServiceRef.current.destroy();
+    if (realTimeApiServiceRef.current) {
+      realTimeApiServiceRef.current.dispose();
     }
   };
   

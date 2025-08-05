@@ -1,10 +1,8 @@
 # TODO:
 
-- [x] realtime-page: 创建实时语音页面组件(RealTimePage.tsx)，实现现代化通话界面 (priority: High)
-- [x] audio-service: 创建音频管理服务，集成浏览器音频权限和录制播放功能 (priority: High)
-- [x] websocket-service: 创建WebSocket服务类，处理与后端DoubaoRealTimeService的实时通信 (priority: High)
-- [x] audio-visualization: 实现音频波形显示和通话状态指示器 (priority: Medium)
-- [x] routing-update: 更新路由配置，在导航中添加实时语音页面 (priority: Medium)
-- [x] types-constants: 添加实时语音相关的类型定义和常量配置 (priority: Medium)
-- [x] error-handling: 添加错误处理和用户体验优化 (priority: Low)
-- [x] testing: 测试完整的实时语音对话功能 (priority: Low)
+- [x] analyze_python_structure: 分析Python版本的整体架构：audio_manager.py的DialogSession类、protocol.py的协议处理、realtime_dialog_client.py的客户端逻辑 (priority: High)
+- [x] rewrite_protocol_layer: 按照Python版本的protocol.py重写协议层，包括消息序列化、头部生成、事件处理 (priority: High)
+- [x] rewrite_client_layer: 按照Python版本的realtime_dialog_client.py重写客户端层，包括WebSocket连接、消息发送接收 (priority: High)
+- [x] rewrite_session_manager: 按照Python版本的audio_manager.py中的DialogSession类重写会话管理，包括音频处理、状态管理 (priority: High)
+- [x] integrate_components: 整合所有组件，确保与Python版本的逻辑完全一致，移除所有Go版本相关代码 (priority: Medium)
+- [x] test_integration: 测试重构后的服务与前端的集成，确保功能正常 (priority: Medium)

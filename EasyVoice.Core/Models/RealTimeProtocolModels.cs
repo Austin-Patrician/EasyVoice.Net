@@ -286,18 +286,18 @@ public static class ProtocolUtils
     }
     
     /// <summary>
-    /// 获取消息类型对应的字节值
+    /// 获取消息类型对应的字节值 (参考Go实现的msgTypeToBits)
     /// </summary>
     public static byte GetMessageTypeBits(MessageType messageType)
     {
         return messageType switch
         {
-            MessageType.FullClient => 0b0001_0000,
-            MessageType.AudioOnlyClient => 0b0010_0000,
-            MessageType.FullServer => 0b1001_0000,
-            MessageType.AudioOnlyServer => 0b1011_0000,
-            MessageType.FrontEndResultServer => 0b1100_0000,
-            MessageType.Error => 0b1111_0000,
+            MessageType.FullClient => 0b0001 << 4,           // 0b0001_0000
+            MessageType.AudioOnlyClient => 0b0010 << 4,      // 0b0010_0000
+            MessageType.FullServer => 0b1001 << 4,           // 0b1001_0000
+            MessageType.AudioOnlyServer => 0b1011 << 4,      // 0b1011_0000
+            MessageType.FrontEndResultServer => 0b1100 << 4, // 0b1100_0000
+            MessageType.Error => 0b1111 << 4,                // 0b1111_0000
             _ => 0
         };
     }

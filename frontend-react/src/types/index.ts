@@ -296,3 +296,142 @@ export enum RealTimeEventType {
   SayHello = 'say_hello',
   ChatTtsText = 'chat_tts_text'
 }
+
+// 后端API接口类型定义
+export enum RealTimeDialogState {
+  Created = 'Created',
+  Connecting = 'Connecting',
+  Connected = 'Connected',
+  InSession = 'InSession',
+  Disconnecting = 'Disconnecting',
+  Disconnected = 'Disconnected',
+  Error = 'Error'
+}
+
+// API请求类型
+export interface CreateSessionRequest {
+  appId: string;
+  accessToken: string;
+  webSocketUrl?: string;
+  connectionTimeoutMs?: number;
+  audioBufferSeconds?: number;
+}
+
+export interface StartSessionRequest {
+  botName?: string;
+  systemRole?: string;
+  speakingStyle?: string;
+  audioConfig?: {
+    channel?: number;
+    format?: string;
+    sampleRate?: number;
+  };
+}
+
+export interface AudioConfigRequest {
+  sessionId: string;
+  channel: number;
+  format: string;
+  sampleRate: number;
+}
+
+export interface SayHelloRequest {
+  content: string;
+}
+
+// API响应类型
+export interface CreateSessionResponse {
+  sessionId: string;
+  status: string;
+  message: string;
+}
+
+export interface SessionInfo {
+  sessionId: string;
+  state: RealTimeDialogState;
+  createdAt: Date;
+  lastActiveAt?: Date;
+}
+
+export interface SessionStatusResponse {
+  sessionId: string;
+  state: string;
+  createdAt: Date;
+  lastActiveAt?: Date;
+  isConnected: boolean;
+}
+
+export interface ApiSuccessResponse {
+  success: boolean;
+  message?: string;
+}
+
+// 音频设备类型
+export interface AudioDevice {
+  deviceId: string;
+  label: string;
+  kind: 'audioinput' | 'audiooutput';
+}
+
+export interface AudioPermissions {
+  microphone: boolean;
+  speaker: boolean;
+}
+
+// 音频管理器配置
+export interface AudioManagerConfig {
+  sampleRate?: number;
+  channels?: number;
+  bufferSize?: number;
+  echoCancellation?: boolean;
+  noiseSuppression?: boolean;
+  autoGainControl?: boolean;
+}
+
+// WebSocket连接统计
+export interface ConnectionStats {
+  bytesReceived: number;
+  bytesSent: number;
+  messagesReceived: number;
+  messagesSent: number;
+  connectionDuration: number;
+  lastPingTime?: number;
+  averageLatency?: number;
+}
+
+// 实时语音服务事件
+export interface RealTimeServiceEvent {
+  type: 'connection' | 'audio' | 'dialog' | 'error' | 'stats';
+  data: any;
+  timestamp: Date;
+}
+
+// 音频数据事件
+export interface AudioDataEvent {
+  data: ArrayBuffer;
+  format: string;
+  sampleRate: number;
+  channels: number;
+}
+
+// 对话事件
+export interface DialogEvent {
+  type: 'user_speech' | 'bot_response' | 'conversation_end';
+  content?: string;
+  audioData?: ArrayBuffer;
+  timestamp: Date;
+}
+
+// 错误事件
+export interface ErrorEvent {
+  code: string;
+  message: string;
+  details?: any;
+  timestamp: Date;
+}
+
+// 连接状态变更事件
+export interface ConnectionStateEvent {
+  oldState: RealTimeConnectionState;
+  newState: RealTimeConnectionState;
+}
