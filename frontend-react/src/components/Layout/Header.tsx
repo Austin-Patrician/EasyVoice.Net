@@ -7,6 +7,7 @@ const navigation = [
   { name: '首页', href: '/' },
   { name: '语音生成', href: '/generate' },
   { name: '实时语音', href: '/realtime' },
+  { name: '实时对话', href: '/realtime-dialog' },
   { name: '关于', href: '/about' },
 ];
 

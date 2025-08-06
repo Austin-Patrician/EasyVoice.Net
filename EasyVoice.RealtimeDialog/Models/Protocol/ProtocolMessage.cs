@@ -1,5 +1,4 @@
 using System.Text.Json.Serialization;
-using EasyVoice.RealtimeDialog.Models.Session;
 
 namespace EasyVoice.RealtimeDialog.Models.Protocol;
 
@@ -61,12 +60,6 @@ public class ClientFullRequestMessage : ProtocolMessage
     /// </summary>
     [JsonPropertyName("is_final")]
     public bool IsFinal { get; set; }
-    
-    /// <summary>
-    /// 用户配置
-    /// </summary>
-    [JsonPropertyName("user_config")]
-    public UserConfig? UserConfig { get; set; }
 }
 
 /// <summary>
@@ -224,11 +217,6 @@ public class SessionControlMessage : ProtocolMessage
     [JsonPropertyName("control_type")]
     public string ControlType { get; set; } = string.Empty;
     
-    /// <summary>
-    /// 会话配置
-    /// </summary>
-    [JsonPropertyName("session_config")]
-    public SessionConfig? SessionConfig { get; set; }
     
     /// <summary>
     /// 结束原因（仅在end时使用）
@@ -249,14 +237,32 @@ public class TtsTriggerMessage : ProtocolMessage
     public string TriggerText { get; set; } = string.Empty;
     
     /// <summary>
-    /// 语音配置
-    /// </summary>
-    [JsonPropertyName("voice_config")]
-    public VoiceConfig? VoiceConfig { get; set; }
-    
-    /// <summary>
     /// 是否立即播放
     /// </summary>
     [JsonPropertyName("immediate_play")]
     public bool ImmediatePlay { get; set; } = true;
+}
+
+/// <summary>
+/// Chat TTS文本消息
+/// </summary>
+public class ChatTtsTextMessage : ProtocolMessage
+{
+    /// <summary>
+    /// 是否为开始事件
+    /// </summary>
+    [JsonPropertyName("start")]
+    public bool Start { get; set; }
+    
+    /// <summary>
+    /// 是否为结束事件
+    /// </summary>
+    [JsonPropertyName("end")]
+    public bool End { get; set; }
+    
+    /// <summary>
+    /// 文本内容
+    /// </summary>
+    [JsonPropertyName("content")]
+    public string Content { get; set; } = string.Empty;
 }

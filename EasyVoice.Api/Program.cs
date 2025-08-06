@@ -1,7 +1,6 @@
 using FFMpegCore;
 using Microsoft.AspNetCore.WebSockets;
-using EasyVoice.RealtimeDialog.Extensions;
-using EasyVoice.RealtimeDialog.Hubs;
+using EasyVoice.Api.Hubs;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -70,22 +69,30 @@ builder.Services.AddScoped<EasyVoice.Core.Interfaces.ITtsService, EasyVoice.Core
 builder.Services.AddScoped<EasyVoice.Core.Interfaces.ILlmService, EasyVoice.Core.Services.LlmService>();
 builder.Services.AddScoped<EasyVoice.Core.Interfaces.IAnalysisTextService, EasyVoice.Core.Services.AnalysisTextService>();
 
-// Register Real-time service
+// Register Real-time Dialog services
 builder.Services.AddMemoryCache();
+
+// Register Realtime Dialog services
+builder.Services.AddSingleton<EasyVoice.RealtimeDialog.Services.DoubaoProtocolHandler>();
+builder.Services.AddSingleton<EasyVoice.RealtimeDialog.Services.WebSocketClientManager>();
+builder.Services.AddSingleton<EasyVoice.RealtimeDialog.Services.RealtimeDialogService>();
+builder.Services.AddSingleton<EasyVoice.RealtimeDialog.Services.AudioService>();
+
 // Add SignalR support
 builder.Services.AddSignalR();
 
-// Add Real-time Dialog services
-builder.Services.AddRealtimeDialog(builder.Configuration);
-
 // Add controllers to the container.
 builder.Services.AddControllers();
-builder.Services.AddCors(_=> _.AddDefaultPolicy(policy =>
+builder.Services.AddCors(options =>
 {
-    policy.AllowAnyOrigin()
-          .AllowAnyHeader()
-          .AllowAnyMethod();
-}));
+    options.AddDefaultPolicy(policy =>
+    {
+        policy.WithOrigins("http://localhost:5173", "http://localhost:5174")
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .AllowCredentials();
+    });
+});
 
 // Add WebSocket support
 builder.Services.AddWebSockets(options =>
@@ -115,6 +122,8 @@ app.UseAuthorization();
 
 // Map SignalR hubs
 app.MapHub<RealtimeDialogHub>("/hubs/realtime-dialog");
+// Map RealTime WebSocket endpoint for frontend integration
+app.MapHub<RealtimeDialogHub>("/api/realtime/ws");
 
 app.MapControllers();
 

@@ -1,767 +1,539 @@
 using System.Collections.Concurrent;
-using EasyVoice.RealtimeDialog.Audio;
+using System.Text;
+using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using EasyVoice.RealtimeDialog.Models;
 using EasyVoice.RealtimeDialog.Models.Audio;
 using EasyVoice.RealtimeDialog.Models.Protocol;
-using EasyVoice.RealtimeDialog.Models.Session;
-using EasyVoice.RealtimeDialog.Protocols;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace EasyVoice.RealtimeDialog.Services;
 
 /// <summary>
-/// 实时对话服务实现
+/// 实时对话服务
+/// 实现完整的server_vad模式交互流程
 /// </summary>
-public class RealtimeDialogService : IRealtimeDialogService, IDisposable
+public class RealtimeDialogService : IDisposable
 {
     private readonly ILogger<RealtimeDialogService> _logger;
     private readonly WebSocketClientManager _webSocketManager;
-    private readonly AudioProcessingService _audioService;
-    private readonly DoubaoProtocolHandler _protocolHandler;
-    private readonly RealtimeDialogOptions _options;
-    
     private readonly ConcurrentDictionary<string, DialogSession> _sessions;
-    private readonly SemaphoreSlim _sessionLock;
-    private readonly Timer _sessionCleanupTimer;
-    
     private bool _disposed;
+    
+    // 事件定义
+    public event Func<string, DoubaoResponse, Task>? OnSessionEvent;
+    public event Func<string, byte[], Task>? OnAudioReceived;
+    public event Func<string, string, Task>? OnTextReceived;
+    public event Func<string, Exception, Task>? OnSessionError;
+    public event Func<string, Task>? OnSessionEnded;
+    public event Func<Exception, Task>? OnError;
+    
+    // 新增的事件定义
+    public event EventHandler<DoubaoResponse>? OnAsrInfo;
+    public event EventHandler<DoubaoResponse>? OnAsrResponse;
+    public event EventHandler<DoubaoResponse>? OnAsrEnded;
+    public event EventHandler<DoubaoResponse>? OnTtsResponse;
+    public event EventHandler<string>? OnSessionStarted;
     
     public RealtimeDialogService(
         ILogger<RealtimeDialogService> logger,
-        WebSocketClientManager webSocketManager,
-        AudioProcessingService audioService,
-        DoubaoProtocolHandler protocolHandler,
-        IOptions<RealtimeDialogOptions> options)
+        WebSocketClientManager webSocketManager)
     {
         _logger = logger;
         _webSocketManager = webSocketManager;
-        _audioService = audioService;
-        _protocolHandler = protocolHandler;
-        _options = options.Value;
-        
         _sessions = new ConcurrentDictionary<string, DialogSession>();
-        _sessionLock = new SemaphoreSlim(1, 1);
         
-        // 定期清理过期会话
-        _sessionCleanupTimer = new Timer(CleanupExpiredSessions, null, 
-            TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5));
-        
-        // 订阅事件
-        _webSocketManager.ConnectionStatusChanged += OnConnectionStatusChanged;
-        _webSocketManager.MessageReceived += OnMessageReceived;
-        _webSocketManager.ConnectionError += OnConnectionError;
-        
-        _audioService.AudioDataAvailable += OnAudioDataAvailable;
-        _audioService.PlaybackCompleted += OnPlaybackCompleted;
-        _audioService.ProcessingError += OnAudioProcessingError;
-    }
-    
-    #region Events
-    
-    /// <summary>
-    /// 会话状态变化事件
-    /// </summary>
-    public event EventHandler<SessionStatusChangedEventArgs>? SessionStatusChanged;
-    
-    /// <summary>
-    /// 服务器响应事件
-    /// </summary>
-    public event EventHandler<ServerResponseEventArgs>? ServerResponseReceived;
-    
-    /// <summary>
-    /// 音频数据事件
-    /// </summary>
-    public event EventHandler<AudioDataEventArgs>? AudioDataReceived;
-    
-    /// <summary>
-    /// 错误事件
-    /// </summary>
-    public event EventHandler<ErrorEventArgs>? ErrorOccurred;
-    
-    #endregion
-    
-    #region Session Management
-    
-    /// <summary>
-    /// 创建会话
-    /// </summary>
-    /// <param name="userId">用户ID</param>
-    /// <param name="config">会话配置</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>会话信息</returns>
-    public async Task<DialogSession> CreateSessionAsync(string userId, SessionConfig config, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            await _sessionLock.WaitAsync(cancellationToken);
-            
-            // 检查并发会话限制
-            if (_sessions.Count >= _options.MaxConcurrentSessions)
-            {
-                throw new InvalidOperationException($"已达到最大并发会话数限制: {_options.MaxConcurrentSessions}");
-            }
-            
-            var sessionId = Guid.NewGuid().ToString();
-            var session = new DialogSession
-            {
-                SessionId = sessionId,
-                Config = config,
-                Status = SessionStatus.Created,
-                CreatedAt = DateTime.UtcNow,
-                LastActivityAt = DateTime.UtcNow,
-                Messages = new List<SessionMessage>()
-            };
-            
-            _sessions.TryAdd(sessionId, session);
-            
-            // 创建音频会话
-            _audioService.CreateSession(sessionId, config.AudioConfig);
-            
-            OnSessionStatusChanged(new SessionStatusChangedEventArgs
-            {
-                SessionId = sessionId,
-                OldStatus = SessionStatus.None,
-                NewStatus = SessionStatus.Created,
-                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-            });
-            
-            _logger.LogInformation("创建会话: {SessionId}", sessionId);
-            return session;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "创建会话失败");
-            throw;
-        }
-        finally
-        {
-            _sessionLock.Release();
-        }
+        // 订阅WebSocket事件
+        _webSocketManager.OnMessageReceived += HandleWebSocketMessage;
+        _webSocketManager.OnError += HandleWebSocketError;
+        _webSocketManager.OnDisconnected += HandleWebSocketDisconnected;
     }
     
     /// <summary>
-    /// 获取会话
+    /// 连接到豆包实时语音API
     /// </summary>
-    /// <param name="sessionId">会话ID</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>会话信息</returns>
-    public Task<DialogSession?> GetSessionAsync(string sessionId, CancellationToken cancellationToken = default)
+    public async Task<bool> ConnectAsync(string appId, string accessKey, string? connectId = null)
     {
-        _sessions.TryGetValue(sessionId, out var session);
-        return Task.FromResult(session);
+        return await _webSocketManager.ConnectAsync(appId, accessKey, connectId);
     }
     
     /// <summary>
-    /// 开始会话
+    /// 开始新的对话会话
     /// </summary>
-    /// <param name="sessionId">会话ID</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>开始任务</returns>
-    public async Task StartSessionAsync(string sessionId, CancellationToken cancellationToken = default)
+    public async Task<string> StartSessionAsync(SessionConfig config)
     {
-        try
+        var sessionId = Guid.NewGuid().ToString();
+        
+        var session = new DialogSession
         {
-            var session = await GetSessionAsync(sessionId);
-            if (session == null)
+            SessionId = sessionId,
+            Config = config,
+            Status = SessionStatus.Starting,
+            CreatedAt = DateTimeOffset.UtcNow,
+            IsUserQuerying = false,
+            IsSendingChatTtsText = false
+        };
+        
+        _sessions[sessionId] = session;
+        
+        // 构建StartSession请求配置
+        var sessionRequestConfig = new
+        {
+            tts = new
             {
-                throw new ArgumentException($"会话不存在: {sessionId}");
+                audio_config = new
+                {
+                    channel = config.AudioConfig.Channels,
+                    format = config.AudioConfig.Format,
+                    sample_rate = config.AudioConfig.SampleRate
+                },
+                speaker = config.Speaker ?? "zh_female_vv_jupiter_bigtts"
+            },
+            dialog = new
+            {
+                bot_name = config.BotName ?? "豆包",
+                system_role = config.SystemRole ?? "你使用活泼灵动的女声，性格开朗，热爱生活。",
+                speaking_style = config.SpeakingStyle ?? "你的说话风格简洁明了，语速适中，语调自然。",
+                extra = new
+                {
+                    strict_audit = false,
+                    audit_response = "支持客户自定义安全审核回复话术。"
+                }
             }
-            
-            if (session.Status != SessionStatus.Created)
-            {
-                throw new InvalidOperationException($"会话状态无效: {session.Status}");
-            }
-            
-            // 建立WebSocket连接
-            var connected = await _webSocketManager.CreateConnectionAsync(sessionId, cancellationToken);
-            if (!connected)
-            {
-                throw new InvalidOperationException("建立WebSocket连接失败");
-            }
-            
-            // 初始化音频服务
-            await _audioService.InitializeAsync(session.Config.AudioConfig, cancellationToken);
-            
-            // 发送会话控制消息
-            var sessionControlMessage = new SessionControl
-            {
-                Header = CreateMessageHeader(MessageType.SessionControl),
-                Action = "start",
-                SessionId = sessionId,
-                Config = session.Config
-            };
-            
-            await _webSocketManager.SendMessageAsync(sessionId, sessionControlMessage, cancellationToken);
-            
+        };
+        
+        var success = await _webSocketManager.StartSessionAsync(sessionId, sessionRequestConfig);
+        if (success)
+        {
             session.Status = SessionStatus.Active;
-            session.StartedAt = DateTime.UtcNow;
-            session.LastActivityAt = DateTime.UtcNow;
+            _logger.LogInformation("会话已开始: {SessionId}", sessionId);
             
-            OnSessionStatusChanged(new SessionStatusChangedEventArgs
-            {
-                SessionId = sessionId,
-                OldStatus = SessionStatus.Created,
-                NewStatus = SessionStatus.Active,
-                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-            });
-            
-            _logger.LogInformation("会话已启动: {SessionId}", sessionId);
+            // 触发SessionStarted事件
+            OnSessionStarted?.Invoke(this, sessionId);
         }
-        catch (Exception ex)
+        else
         {
-            _logger.LogError(ex, "启动会话失败: {SessionId}", sessionId);
-            
-            OnErrorOccurred(new ErrorEventArgs
-            {
-                SessionId = sessionId,
-                ErrorType = "SessionStartFailed",
-                ErrorMessage = ex.Message,
-                Exception = ex,
-                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-            });
-            
-            throw;
+            session.Status = SessionStatus.Failed;
+            _sessions.TryRemove(sessionId, out _);
+            throw new InvalidOperationException("开始会话失败");
         }
+        
+        return sessionId;
     }
     
     /// <summary>
     /// 结束会话
     /// </summary>
-    /// <param name="sessionId">会话ID</param>
-    /// <param name="reason">结束原因</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>结束任务</returns>
-    public async Task EndSessionAsync(string sessionId, string? reason = null, CancellationToken cancellationToken = default)
+    public async Task<bool> EndSessionAsync(string sessionId)
     {
-        try
+        if (!_sessions.TryGetValue(sessionId, out var session))
         {
-            var session = await GetSessionAsync(sessionId);
-            if (session == null)
-            {
-                return;
-            }
-            
-            // 停止录制
-            await _audioService.StopRecordingAsync(sessionId, cancellationToken);
-            
-            // 发送会话结束消息
-            var sessionControlMessage = new SessionControl
-            {
-                Header = CreateMessageHeader(MessageType.SessionControl),
-                Action = "end",
-                SessionId = sessionId
-            };
-            
-            await _webSocketManager.SendMessageAsync(sessionId, sessionControlMessage, cancellationToken);
-            
-            // 关闭WebSocket连接
-            await _webSocketManager.CloseConnectionAsync(sessionId, cancellationToken);
-            
-            // 移除音频会话
-            _audioService.RemoveSession(sessionId);
-            
+            _logger.LogWarning("会话不存在: {SessionId}", sessionId);
+            return false;
+        }
+        
+        session.Status = SessionStatus.Ending;
+        
+        var success = await _webSocketManager.FinishSessionAsync(sessionId);
+        if (success)
+        {
             session.Status = SessionStatus.Ended;
-            session.EndedAt = DateTime.UtcNow;
-            
-            OnSessionStatusChanged(new SessionStatusChangedEventArgs
-            {
-                SessionId = sessionId,
-                OldStatus = SessionStatus.Created,
-                NewStatus = SessionStatus.Ended,
-                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-            });
-            
+            _sessions.TryRemove(sessionId, out _);
             _logger.LogInformation("会话已结束: {SessionId}", sessionId);
         }
-        catch (Exception ex)
+        else
         {
-            _logger.LogError(ex, "结束会话失败: {SessionId}", sessionId);
-            throw;
+            session.Status = SessionStatus.Failed;
+            _logger.LogError("结束会话失败: {SessionId}", sessionId);
         }
+        
+        return success;
     }
     
     /// <summary>
-    /// 删除会话
+    /// 发送Hello消息
     /// </summary>
-    /// <param name="sessionId">会话ID</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>删除任务</returns>
-    public async Task DeleteSessionAsync(string sessionId, CancellationToken cancellationToken = default)
+    public async Task<bool> SayHelloAsync()
     {
-        try
-        {
-            // 先结束会话
-            await EndSessionAsync(sessionId, cancellationToken);
-            
-            // 从内存中移除
-            _sessions.TryRemove(sessionId, out _);
-            
-            _logger.LogInformation("会话已删除: {SessionId}", sessionId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "删除会话失败: {SessionId}", sessionId);
-            throw;
-        }
+        return await _webSocketManager.SayHelloAsync();
     }
     
-    #endregion
+    /// <summary>
+    /// 获取会话信息
+    /// </summary>
+    public DialogSession? GetSession(string sessionId)
+    {
+        _sessions.TryGetValue(sessionId, out var session);
+        return session;
+    }
     
-    #region Communication
+    /// <summary>
+    /// 获取所有活跃会话
+    /// </summary>
+    public IEnumerable<DialogSession> GetActiveSessions()
+    {
+        return _sessions.Values.Where(s => s.Status == SessionStatus.Active);
+    }
+    
+    /// <summary>
+    /// 发送ChatTTSText请求
+    /// </summary>
+    public async Task<bool> SendChatTtsTextAsync(string text, string? voiceId = null, float speed = 1.0f, string? emotion = null)
+    {
+        // 获取第一个活跃会话，或者可以根据需要修改为接受sessionId参数
+        var activeSession = GetActiveSessions().FirstOrDefault();
+        if (activeSession == null)
+        {
+            _logger.LogWarning("没有活跃的会话可以发送ChatTTSText");
+            return false;
+        }
+        
+        return await _webSocketManager.SendChatTtsTextAsync(activeSession.SessionId, text, true, true);
+    }
     
     /// <summary>
     /// 发送音频数据
     /// </summary>
-    /// <param name="sessionId">会话ID</param>
-    /// <param name="audioChunk">音频块</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>发送任务</returns>
-    public async Task SendAudioAsync(string sessionId, AudioChunk audioChunk, CancellationToken cancellationToken = default)
+    public async Task<bool> SendAudioAsync(byte[] audioData)
+    {
+        // 获取第一个活跃会话，或者可以根据需要修改为接受sessionId参数
+        var activeSession = GetActiveSessions().FirstOrDefault();
+        if (activeSession == null)
+        {
+            _logger.LogWarning("没有活跃的会话可以发送音频");
+            return false;
+        }
+        
+        return await _webSocketManager.SendAudioAsync(activeSession.SessionId, audioData);
+    }
+    
+    /// <summary>
+    /// 发送音频数据（带会话ID和结束标志）
+    /// </summary>
+    public async Task<bool> SendAudioAsync(string sessionId, byte[] audioData, bool isLast = false)
+    {
+        if (!_sessions.ContainsKey(sessionId))
+        {
+            _logger.LogWarning("会话不存在: {SessionId}", sessionId);
+            return false;
+        }
+        
+        return await _webSocketManager.SendAudioAsync(sessionId, audioData);
+    }
+    
+    /// <summary>
+    /// 获取会话信息（异步版本）
+    /// </summary>
+    public async Task<DialogSession?> GetSessionInfoAsync(string sessionId)
+    {
+        await Task.CompletedTask; // 保持异步签名
+        return GetSession(sessionId);
+    }
+    
+    /// <summary>
+    /// 处理WebSocket消息
+    /// </summary>
+    private async Task HandleWebSocketMessage(DoubaoResponse response)
     {
         try
         {
-            var session = await GetSessionAsync(sessionId);
-            if (session == null || session.Status != SessionStatus.Active)
+            _logger.LogDebug("收到WebSocket消息: Event={Event}, SessionId={SessionId}", 
+                response.Event, response.SessionId);
+            
+            if (response?.Event != null)
             {
-                throw new InvalidOperationException($"会话不可用: {sessionId}");
-            }
-            
-            var audioRequest = new ClientAudioOnlyRequest
-            {
-                Header = CreateMessageHeader(MessageType.ClientAudioOnlyRequest),
-                SessionId = sessionId,
-                AudioData = audioChunk.Data,
-                AudioFormat = session.Config.AudioConfig.InputFormat,
-                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-            };
-            
-            await _webSocketManager.SendMessageAsync(sessionId, audioRequest, cancellationToken);
-            
-            // 记录消息
-            session.Messages.Add(new SessionMessage
-            {
-                MessageId = Guid.NewGuid().ToString(),
-                MessageType = Models.Session.MessageType.Audio,
-                TextContent = $"音频数据 ({audioChunk.Data.Length} 字节)",
-                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                IsUserMessage = true,
-                ProcessingStatus = MessageProcessingStatus.Pending
-            });
-            
-            session.LastActivityAt = DateTime.UtcNow;
-            
-            _logger.LogDebug("发送音频数据: {SessionId}, 大小: {Size} 字节", sessionId, audioChunk.Data.Length);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "发送音频数据失败: {SessionId}", sessionId);
-            
-            OnErrorOccurred(new ErrorEventArgs
-            {
-                SessionId = sessionId,
-                ErrorType = "SendAudioFailed",
-                ErrorMessage = ex.Message,
-                Exception = ex,
-                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-            });
-            
-            throw;
-        }
-    }
-    
-    /// <summary>
-    /// 发送文本消息
-    /// </summary>
-    /// <param name="sessionId">会话ID</param>
-    /// <param name="text">文本内容</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>发送任务</returns>
-    public async Task SendTextAsync(string sessionId, string text, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var session = await GetSessionAsync(sessionId);
-            if (session == null || session.Status != SessionStatus.Active)
-            {
-                throw new InvalidOperationException($"会话不可用: {sessionId}");
-            }
-            
-            var textRequest = new ClientFullRequestMessage
-            {
-                Header = CreateMessageHeader(Models.Protocol.MessageType.ClientFullRequest),
-                SessionId = sessionId,
-                Text = text,
-                AudioData = Array.Empty<byte>(),
-                AudioFormat = session.Config.AudioConfig.InputFormat,
-                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-            };
-            
-            await _webSocketManager.SendMessageAsync(sessionId, textRequest, cancellationToken);
-            
-            // 记录消息
-            session.Messages.Add(new SessionMessage
-            {
-                MessageId = Guid.NewGuid().ToString(),
-                MessageType = Models.Session.MessageType.Text,
-                TextContent = text,
-                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                IsUserMessage = true,
-                ProcessingStatus = MessageProcessingStatus.Pending
-            });
-            
-            session.LastActivityAt = DateTime.UtcNow;
-            
-            _logger.LogDebug("发送文本消息: {SessionId}, 内容: {Text}", sessionId, text);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "发送文本消息失败: {SessionId}", sessionId);
-            
-            OnErrorOccurred(new ErrorEventArgs
-            {
-                SessionId = sessionId,
-                ErrorType = "SendTextFailed",
-                ErrorMessage = ex.Message,
-                Exception = ex,
-                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-            });
-            
-            throw;
-        }
-    }
-    
-    #endregion
-    
-    #region Data Retrieval
-    
-    /// <summary>
-    /// 获取会话消息
-    /// </summary>
-    /// <param name="sessionId">会话ID</param>
-    /// <param name="limit">限制数量</param>
-    /// <param name="offset">偏移量</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>消息列表</returns>
-    public async Task<IEnumerable<SessionMessage>> GetMessagesAsync(string sessionId, int limit = 50, int offset = 0, CancellationToken cancellationToken = default)
-    {
-        var session = await GetSessionAsync(sessionId);
-        if (session == null)
-        {
-            return Enumerable.Empty<SessionMessage>();
-        }
-        
-        return session.Messages
-            .OrderByDescending(m => m.Timestamp)
-            .Skip(offset)
-            .Take(limit);
-    }
-    
-    /// <summary>
-    /// 获取用户会话列表
-    /// </summary>
-    /// <param name="userId">用户ID</param>
-    /// <param name="limit">限制数量</param>
-    /// <param name="offset">偏移量</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>会话列表</returns>
-    public Task<IEnumerable<DialogSession>> GetUserSessionsAsync(string userId, int limit = 20, int offset = 0, CancellationToken cancellationToken = default)
-    {
-        var sessions = _sessions.Values
-            .Where(s => s.UserId == userId)
-            .OrderByDescending(s => s.CreatedAt)
-            .Skip(offset)
-            .Take(limit);
-        
-        return Task.FromResult(sessions);
-    }
-    
-    /// <summary>
-    /// 获取会话统计信息
-    /// </summary>
-    /// <param name="sessionId">会话ID</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>统计信息</returns>
-    public async Task<AudioStatistics?> GetSessionStatisticsAsync(string sessionId, CancellationToken cancellationToken = default)
-    {
-        var session = await GetSessionAsync(sessionId);
-        if (session == null)
-        {
-            return null;
-        }
-        
-        var audioStats = _audioService.GetStatistics(sessionId);
-        
-        return audioStats;
-    }
-    
-    #endregion
-    
-    #region Private Methods
-    
-    private MessageHeader CreateMessageHeader(Models.Protocol.MessageType messageType)
-    {
-        return new MessageHeader
-        {
-            Version = Convert.ToByte("1.0"),
-            MessageType = messageType,
-            SerializationMethod = SerializationMethod.Json,
-            CompressionMethod = CompressionMethod.Gzip,
-            Flags = MessageFlags.None,
-            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-        };
-    }
-    
-    private void CleanupExpiredSessions(object? state)
-    {
-        try
-        {
-            var expiredSessions = _sessions.Values
-                .Where(s => DateTime.UtcNow - s.LastActivityAt > _options.SessionTimeout)
-                .ToList();
-            
-            foreach (var session in expiredSessions)
-            {
-                _logger.LogInformation("清理过期会话: {SessionId}", session.SessionId);
-                _ = Task.Run(() => DeleteSessionAsync(session.SessionId));
+                await HandleServerResponse(response);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "清理过期会话时发生错误");
+            _logger.LogError(ex, "处理WebSocket消息失败: Event={Event}", response?.Event);
         }
     }
     
-    #endregion
-    
-    #region Event Handlers
-    
-    private void OnConnectionStatusChanged(object? sender, ConnectionStatusChangedEventArgs e)
+    /// <summary>
+    /// 处理服务器响应
+    /// </summary>
+    private async Task HandleServerResponse(DoubaoResponse response)
     {
-        var sessionStatus = e.Status switch
-        {
-            ConnectionStatus.Connected => SessionStatus.Active,
-            ConnectionStatus.Disconnected => SessionStatus.Finished,
-            _ => SessionStatus.Error
-        };
+        var eventType = response.Header?.Event;
+        var sessionId = response.Header?.SessionId ?? string.Empty;
         
-        if (_sessions.TryGetValue(e.SessionId, out var session))
+        switch (eventType)
         {
-            session.Status = sessionStatus;
-            session.LastActivityAt = DateTime.UtcNow;
+            case 450: // ASRInfo - 清空音频缓存，设置用户查询状态
+                await HandleServerFullResponse(response);
+                break;
+                
+            case 451: // ASRResponse - 处理ASR识别结果
+                await HandleServerAck(response);
+                
+                // 触发ASRResponse事件
+                OnAsrResponse?.Invoke(this, response);
+                break;
+                
+            case 459: // ASREnded - 结束ASR，触发ChatTTSText
+                await HandleServerFullResponse(response);
+                
+                // 触发ASREnded事件
+                OnAsrEnded?.Invoke(this, response);
+                break;
+                
+            case 350: // TTSResponse - 处理TTS音频数据
+                await HandleServerFullResponse(response);
+                
+                // 触发TTSResponse事件
+                OnTtsResponse?.Invoke(this, response);
+                break;
+                
+            case 152: // SessionFinished
+            case 153: // SessionFinished
+                await HandleServerFullResponse(response);
+                break;
+                
+            default:
+                await HandleServerAck(response);
+                break;
         }
         
-        OnSessionStatusChanged(new SessionStatusChangedEventArgs
+        // 触发事件
+        if (OnSessionEvent != null)
         {
-            SessionId = e.SessionId,
-            OldStatus = session?.Status ?? SessionStatus.Created,
-            NewStatus = sessionStatus,
-            Timestamp = e.Timestamp
-        });
+            await OnSessionEvent(sessionId, response);
+        }
     }
     
-    private async void OnMessageReceived(object? sender, MessageReceivedEventArgs e)
+    /// <summary>
+    /// 处理服务器完整响应
+    /// </summary>
+    private async Task HandleServerFullResponse(DoubaoResponse response)
     {
-        try
+        var eventType = response.Header?.Event;
+        var sessionId = response.Header?.SessionId ?? string.Empty;
+        
+        if (!_sessions.TryGetValue(sessionId, out var session))
         {
-            var session = await GetSessionAsync(e.SessionId);
-            if (session == null) return;
-            
-            session.LastActivityAt = DateTime.UtcNow;
-            
-            // 处理不同类型的消息
-            switch (e.Message)
+            return;
+        }
+        
+        switch (eventType)
+        {
+            case 450: // ASRInfo - 清空音频缓存，设置用户查询状态
+                session.AudioBuffer.Clear();
+                session.IsUserQuerying = true;
+                _logger.LogDebug("ASRInfo事件: 清空音频缓存，设置用户查询状态 - {SessionId}", sessionId);
+                
+                // 触发ASRInfo事件
+                OnAsrInfo?.Invoke(this, response);
+                break;
+                
+            case 459: // ASREnded - 结束ASR，触发ChatTTSText
+                session.IsUserQuerying = false;
+                _logger.LogDebug("ASREnded事件: 结束ASR - {SessionId}", sessionId);
+                
+                // 触发ChatTTSText
+                await TriggerChatTtsTextAsync(sessionId);
+                break;
+                
+            case 350: // TTSResponse - 处理TTS音频数据
+                if (response.Payload != null)
+                {
+                    // 尝试从Payload中提取音频数据
+                    if (response.PayloadMsg is byte[] audioBytes)
+                    {
+                        if (OnAudioReceived != null)
+                        {
+                            await OnAudioReceived(sessionId, audioBytes);
+                        }
+                    }
+                    else if (response.PayloadMsg is string audioBase64)
+                    {
+                        try
+                        {
+                            var audioData = Convert.FromBase64String(audioBase64);
+                            if (OnAudioReceived != null)
+                            {
+                                await OnAudioReceived(sessionId, audioData);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "解析音频数据失败: {SessionId}", sessionId);
+                        }
+                    }
+                }
+                break;
+                
+            case 152: // SessionFinished
+            case 153: // SessionFinished
+                session.Status = SessionStatus.Ended;
+                _sessions.TryRemove(sessionId, out _);
+                _logger.LogInformation("会话结束: {SessionId}", sessionId);
+                
+                // 触发会话结束事件
+                if (OnSessionEnded != null)
+                {
+                    await OnSessionEnded(sessionId);
+                }
+                break;
+        }
+        
+        session.LastActivityTime = DateTimeOffset.UtcNow;
+    }
+    
+    /// <summary>
+    /// 处理服务器确认响应
+    /// </summary>
+    private async Task HandleServerAck(DoubaoResponse response)
+    {
+        var sessionId = response.Header?.SessionId ?? string.Empty;
+        var eventType = response.Header?.Event;
+        
+        if (!_sessions.TryGetValue(sessionId, out var session))
+        {
+            return;
+        }
+        
+        if (eventType == 451 && response.Payload != null) // ASRResponse
+        {
+            // 尝试从Payload中提取文本数据
+            string? text = null;
+            if (response.PayloadMsg is string textString)
             {
-                case ServerFullResponseMessage response:
-                    await HandleServerResponse(e.SessionId, response);
-                    break;
-                    
-                case ServerAckMessage ack:
-                    await HandleServerAck(e.SessionId, ack);
-                    break;
-                    
-                case ServerErrorResponseMessage error:
-                    await HandleServerError(e.SessionId, error);
-                    break;
-                    
-                case TtsTriggerMessage ttsTrigger:
-                    await HandleTtsTrigger(e.SessionId, ttsTrigger);
-                    break;
+                text = textString;
+            }
+            else if (response.PayloadMsg is JsonElement jsonElement && jsonElement.TryGetProperty("text", out var textProperty))
+            {
+                text = textProperty.GetString();
+            }
+            
+            if (!string.IsNullOrEmpty(text) && OnTextReceived != null)
+            {
+                await OnTextReceived(sessionId, text);
             }
         }
-        catch (Exception ex)
+        
+        session.LastActivityTime = DateTimeOffset.UtcNow;
+        _logger.LogDebug("服务器确认响应: Event={Event}, SessionId={SessionId}", eventType, sessionId);
+    }
+    
+    /// <summary>
+    /// 处理服务器错误
+    /// </summary>
+    private async Task HandleServerError(DoubaoResponse response)
+    {
+        var sessionId = response.Header?.SessionId ?? string.Empty;
+        
+        // 尝试从Payload中提取错误消息
+        string errorMessage = "未知错误";
+        if (response.PayloadMsg is string textString)
         {
-            _logger.LogError(ex, "处理接收消息失败: {SessionId}", e.SessionId);
+            errorMessage = textString;
+        }
+        else if (response.PayloadMsg is JsonElement jsonElement && jsonElement.TryGetProperty("message", out var messageProperty))
+        {
+            errorMessage = messageProperty.GetString() ?? "未知错误";
+        }
+        
+        if (_sessions.TryGetValue(sessionId, out var session))
+        {
+            session.Status = SessionStatus.Failed;
+            session.ErrorMessage = errorMessage;
+        }
+        
+        _logger.LogError("服务器错误: {ErrorMessage}, SessionId: {SessionId}", errorMessage, sessionId);
+        
+        if (OnSessionError != null)
+        {
+            await OnSessionError(sessionId, new Exception(errorMessage));
         }
     }
     
-    private async Task HandleServerResponse(string sessionId, ServerFullResponseMessage response)
+    /// <summary>
+    /// 处理WebSocket错误
+    /// </summary>
+    private async Task HandleWebSocketError(Exception exception)
     {
-        var session = await GetSessionAsync(sessionId);
-        if (session == null) return;
+        _logger.LogError(exception, "WebSocket错误");
         
-        // 记录响应消息
-        session.Messages.Add(new SessionMessage
+        // 触发全局错误事件
+        if (OnError != null)
         {
-            MessageId = Guid.NewGuid().ToString(),
-            MessageType = Models.Session.MessageType.Text,
-            TextContent = response.ResponseText ?? string.Empty,
-            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-            IsUserMessage = false,
-            ProcessingStatus = MessageProcessingStatus.Completed
-        });
+            await OnError(exception);
+        }
         
-        // 播放音频响应
-        if (!string.IsNullOrEmpty(response.TtsAudio))
+        // 将所有活跃会话标记为断开连接
+        foreach (var session in _sessions.Values.Where(s => s.Status == SessionStatus.Active))
         {
-            var audioData = Convert.FromBase64String(response.TtsAudio);
-            var audioChunk = new AudioChunk
-            {
-                Data = audioData,
-                Format = response.AudioFormat ?? session.Config.AudioConfig.OutputFormat,
-                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                SequenceNumber = (uint)session.Messages.Count
-            };
+            session.Status = SessionStatus.Disconnected;
+            session.ErrorMessage = exception.Message;
             
-            await _audioService.PlayAudioAsync(sessionId, audioChunk);
-        }
-        
-        OnServerResponseReceived(new ServerResponseEventArgs
-        {
-            SessionId = sessionId,
-            Message = response,
-            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-        });
-    }
-    
-    private async Task HandleServerAck(string sessionId, ServerAckMessage ack)
-    {
-        _logger.LogDebug("收到服务器确认: {SessionId}, 状态: {Status}", sessionId, ack.Status);
-        
-        // 更新消息状态
-        var session = await GetSessionAsync(sessionId);
-        if (session != null && ack.AckMessageId != null)
-        {
-            var message = session.Messages.FirstOrDefault(m => m.MessageId == ack.AckMessageId);
-            if (message != null)
+            if (OnSessionError != null)
             {
-                message.ProcessingStatus = ack.Status == "success" 
-                    ? MessageProcessingStatus.Completed 
-                    : MessageProcessingStatus.Failed;
+                await OnSessionError(session.SessionId, exception);
             }
         }
     }
     
-    private async Task HandleServerError(string sessionId, ServerErrorResponseMessage error)
+    /// <summary>
+    /// 处理WebSocket断开连接
+    /// </summary>
+    private async Task HandleWebSocketDisconnected()
     {
-        _logger.LogError("收到服务器错误: {SessionId}, 错误码: {ErrorCode}, 消息: {ErrorMessage}", 
-            sessionId, error.ErrorCode, error.ErrorMessage);
+        _logger.LogWarning("WebSocket连接已断开");
         
-        OnErrorOccurred(new ErrorEventArgs
+        // 将所有活跃会话标记为断开连接
+        foreach (var session in _sessions.Values.Where(s => s.Status == SessionStatus.Active))
         {
-            SessionId = sessionId,
-            ErrorType = "ServerError",
-            ErrorMessage = $"[{error.ErrorCode}] {error.ErrorMessage}",
-            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-        });
+            session.Status = SessionStatus.Disconnected;
+            
+            if (OnSessionError != null)
+            {
+                await OnSessionError(session.SessionId, new Exception("WebSocket连接已断开"));
+            }
+        }
     }
     
-    private async Task HandleTtsTrigger(string sessionId, TtsTriggerMessage ttsTrigger)
+    /// <summary>
+    /// 触发ChatTTSText
+    /// </summary>
+    private async Task TriggerChatTtsTextAsync(string sessionId)
     {
-        _logger.LogDebug("收到TTS触发: {SessionId}, 文本: {Text}", sessionId, ttsTrigger.TriggerText);
+        if (!_sessions.TryGetValue(sessionId, out var session))
+        {
+            return;
+        }
         
-        // 可以在这里实现自定义的TTS处理逻辑
-    }
-    
-    private void OnConnectionError(object? sender, ConnectionErrorEventArgs e)
-    {
-        OnErrorOccurred(new ErrorEventArgs
+        if (session.IsSendingChatTtsText)
         {
-            SessionId = e.SessionId,
-            ErrorType = e.ErrorType,
-            ErrorMessage = e.ErrorMessage,
-            Exception = e.Exception,
-            Timestamp = e.Timestamp
-        });
+            _logger.LogDebug("正在发送ChatTTSText，跳过触发 - {SessionId}", sessionId);
+            return;
+        }
+        
+        // 这里可以根据业务逻辑生成回复内容
+        var replyContent = "我收到了您的消息。";
+        
+        await _webSocketManager.SendChatTtsTextAsync(sessionId, replyContent, true, true);
     }
     
-    private void OnAudioDataAvailable(object? sender, AudioDataAvailableEventArgs e)
-    {
-        OnAudioDataReceived(new AudioDataEventArgs
-        {
-            SessionId = string.Empty, // 需要从上下文获取SessionId
-            AudioChunk = e.AudioChunk,
-            IsInput = true,
-            Timestamp = e.RecordedAt
-        });
-    }
-    
-    private void OnPlaybackCompleted(object? sender, PlaybackCompletedEventArgs e)
-    {
-        _logger.LogDebug("音频播放完成");
-    }
-    
-    private void OnAudioProcessingError(object? sender, AudioProcessingErrorEventArgs e)
-    {
-        OnErrorOccurred(new ErrorEventArgs
-        {
-            SessionId = e.SessionId,
-            ErrorType = e.ErrorType,
-            ErrorMessage = e.ErrorMessage,
-            Exception = e.Exception,
-            Timestamp = e.Timestamp
-        });
-    }
-    
-    private void OnSessionStatusChanged(SessionStatusChangedEventArgs e)
-    {
-        SessionStatusChanged?.Invoke(this, e);
-    }
-    
-    private void OnServerResponseReceived(ServerResponseEventArgs e)
-    {
-        ServerResponseReceived?.Invoke(this, e);
-    }
-    
-    private void OnAudioDataReceived(AudioDataEventArgs e)
-    {
-        AudioDataReceived?.Invoke(this, e);
-    }
-    
-    private void OnErrorOccurred(ErrorEventArgs e)
-    {
-        ErrorOccurred?.Invoke(this, e);
-    }
-    
-    #endregion
-    
+    /// <summary>
+    /// 释放资源
+    /// </summary>
     public void Dispose()
     {
-        if (_disposed) return;
-        
-        _logger.LogInformation("释放实时对话服务资源");
-        
-        // 结束所有活跃会话
-        var activeSessions = _sessions.Values
-            .Where(s => s.Status == SessionStatus.Active)
-            .Select(s => s.SessionId)
-            .ToList();
-        
-        var tasks = activeSessions.Select(sessionId => EndSessionAsync(sessionId)).ToArray();
-        
-        try
+        if (_disposed)
         {
-            Task.WaitAll(tasks, TimeSpan.FromSeconds(10));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "结束会话时发生错误");
+            return;
         }
         
-        _sessionCleanupTimer?.Dispose();
-        _sessionLock?.Dispose();
-        _webSocketManager?.Dispose();
-        _audioService?.Dispose();
+        // 取消订阅事件
+        _webSocketManager.OnMessageReceived -= HandleWebSocketMessage;
+        _webSocketManager.OnError -= HandleWebSocketError;
+        _webSocketManager.OnDisconnected -= HandleWebSocketDisconnected;
+        
+        // 清理所有会话
+        _sessions.Clear();
         
         _disposed = true;
+        _logger.LogInformation("RealtimeDialogService已释放");
     }
 }

@@ -4,6 +4,7 @@ import { ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { Layout } from './components/Layout';
 import { HomePage, GeneratePage, AboutPage, NotFoundPage, RealTimePage } from './pages';
+import RealtimeDialog from './pages/RealtimeDialog';
 
 // Antd主题配置
 const theme = {
@@ -23,6 +24,7 @@ function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/generate" element={<GeneratePage />} />
           <Route path="/realtime" element={<RealTimePage />} />
+          <Route path="/realtime-dialog" element={<RealtimeDialog />} />
           <Route path="/about" element={<AboutPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>

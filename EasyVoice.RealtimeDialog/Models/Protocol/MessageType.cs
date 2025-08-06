@@ -48,7 +48,17 @@ public enum MessageType : byte
     /// <summary>
     /// TTS触发事件
     /// </summary>
-    TtsTrigger = 0x40
+    TtsTrigger = 0x40,
+    
+    /// <summary>
+    /// 会话控制消息
+    /// </summary>
+    SessionControl = 0x50,
+    
+    /// <summary>
+    /// Chat TTS文本消息
+    /// </summary>
+    ChatTtsText = 0x60
 }
 
 /// <summary>

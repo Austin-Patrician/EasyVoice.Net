@@ -1,714 +1,331 @@
-using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text;
-using System.Text.Json;
-using EasyVoice.RealtimeDialog.Models.Protocol;
-using EasyVoice.RealtimeDialog.Models.Session;
-using EasyVoice.RealtimeDialog.Protocols;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
+using EasyVoice.RealtimeDialog.Models.Protocol;
 
 namespace EasyVoice.RealtimeDialog.Services;
 
 /// <summary>
 /// WebSocket客户端管理器
+/// 负责与豆包实时语音API建立和维护WebSocket连接
 /// </summary>
 public class WebSocketClientManager : IDisposable
 {
     private readonly ILogger<WebSocketClientManager> _logger;
     private readonly DoubaoProtocolHandler _protocolHandler;
-    private readonly RealtimeDialogOptions _options;
-    
-    private readonly ConcurrentDictionary<string, WebSocketConnection> _connections;
-    private readonly SemaphoreSlim _connectionLock;
-    private readonly Timer _heartbeatTimer;
-    private readonly Timer _cleanupTimer;
-    
+    private ClientWebSocket? _webSocket;
+    private CancellationTokenSource? _cancellationTokenSource;
     private bool _disposed;
+    
+    // 豆包API配置
+    private const string BASE_URL = "wss://openspeech.bytedance.com/api/v3/realtime/dialogue";
+    private const string RESOURCE_ID = "volc.speech.dialog";
+    private const string APP_KEY = "PlgvMymc7f3tQnJ6";
+    
+    public string? LogId { get; private set; }
+    public bool IsConnected => _webSocket?.State == WebSocketState.Open;
+    
+    // 事件
+    public event Func<DoubaoResponse, Task>? OnMessageReceived;
+    public event Func<Exception, Task>? OnError;
+    public event Func<Task>? OnDisconnected;
     
     public WebSocketClientManager(
         ILogger<WebSocketClientManager> logger,
-        DoubaoProtocolHandler protocolHandler,
-        IOptions<RealtimeDialogOptions> options)
+        DoubaoProtocolHandler protocolHandler)
     {
         _logger = logger;
         _protocolHandler = protocolHandler;
-        _options = options.Value;
-        
-        _connections = new ConcurrentDictionary<string, WebSocketConnection>();
-        _connectionLock = new SemaphoreSlim(1, 1);
-        
-        // 心跳定时器，每30秒发送一次心跳
-        _heartbeatTimer = new Timer(SendHeartbeats, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
-        
-        // 清理定时器，每分钟清理一次过期连接
-        _cleanupTimer = new Timer(CleanupExpiredConnections, null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
     }
     
     /// <summary>
-    /// 连接状态变化事件
+    /// 连接到豆包实时语音API
     /// </summary>
-    public event EventHandler<ConnectionStatusChangedEventArgs>? ConnectionStatusChanged;
-    
-    /// <summary>
-    /// 消息接收事件
-    /// </summary>
-    public event EventHandler<MessageReceivedEventArgs>? MessageReceived;
-    
-    /// <summary>
-    /// 连接错误事件
-    /// </summary>
-    public event EventHandler<ConnectionErrorEventArgs>? ConnectionError;
-    
-    /// <summary>
-    /// 创建WebSocket连接
-    /// </summary>
-    /// <param name="sessionId">会话ID</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>连接任务</returns>
-    public async Task<bool> CreateConnectionAsync(string sessionId, CancellationToken cancellationToken = default)
+    public async Task<bool> ConnectAsync(string appId, string accessKey, string? connectId = null)
     {
         try
         {
-            await _connectionLock.WaitAsync(cancellationToken);
-            
-            if (_connections.ContainsKey(sessionId))
+            if (_webSocket != null)
             {
-                _logger.LogWarning("会话已存在WebSocket连接: {SessionId}", sessionId);
-                return false;
+                await DisconnectAsync();
             }
             
-            var clientWebSocket = new ClientWebSocket();
+            _webSocket = new ClientWebSocket();
+            _cancellationTokenSource = new CancellationTokenSource();
             
             // 设置请求头
-            clientWebSocket.Options.SetRequestHeader("Authorization", $"Bearer {_options.DoubaoApiKey}");
-            clientWebSocket.Options.SetRequestHeader("X-Session-Id", sessionId);
+            _webSocket.Options.SetRequestHeader("X-Api-App-ID", appId);
+            _webSocket.Options.SetRequestHeader("X-Api-Access-Key", accessKey);
+            _webSocket.Options.SetRequestHeader("X-Api-Resource-Id", RESOURCE_ID);
+            _webSocket.Options.SetRequestHeader("X-Api-App-Key", APP_KEY);
             
-            // 连接到WebSocket服务器
-            var uri = new Uri(_options.WebSocketEndpoint);
-            await clientWebSocket.ConnectAsync(uri, cancellationToken);
-            
-            var connection = new WebSocketConnection
+            if (!string.IsNullOrEmpty(connectId))
             {
-                SessionId = sessionId,
-                WebSocket = clientWebSocket,
-                State = WebSocketState.Open,
-                ConnectedAt = DateTime.UtcNow,
-                LastActivity = DateTime.UtcNow,
-                SequenceNumber = 0
-            };
+                _webSocket.Options.SetRequestHeader("X-Api-Connect-Id", connectId);
+            }
             
-            _connections.TryAdd(sessionId, connection);
+            // 建立连接
+            await _webSocket.ConnectAsync(new Uri(BASE_URL), _cancellationTokenSource.Token);
             
-            // 启动消息接收任务
-            _ = Task.Run(() => ReceiveMessagesAsync(connection, cancellationToken), cancellationToken);
-            
-            OnConnectionStatusChanged(new ConnectionStatusChangedEventArgs
+            // 获取LogId
+            if (_webSocket.HttpResponseHeaders != null)
             {
-                SessionId = sessionId,
-                Status = ConnectionStatus.Connected,
-                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-            });
+                LogId = _webSocket.HttpResponseHeaders.FirstOrDefault(h => 
+                    h.Key.Equals("X-Tt-Logid", StringComparison.OrdinalIgnoreCase)).Value?.FirstOrDefault();
+            }
             
-            _logger.LogInformation("WebSocket连接已建立: {SessionId}", sessionId);
+            _logger.LogInformation("WebSocket连接成功，LogId: {LogId}", LogId);
+            
+            // 发送StartConnection请求
+            var startConnectionRequest = _protocolHandler.CreateStartConnectionRequest();
+            await SendBinaryAsync(startConnectionRequest);
+            
+            // 接收StartConnection响应
+            var response = await ReceiveAsync();
+            _logger.LogInformation("StartConnection响应: {Response}", 
+                System.Text.Json.JsonSerializer.Serialize(response));
+            
+            // 启动接收循环
+            _ = Task.Run(ReceiveLoop, _cancellationTokenSource.Token);
+            
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "创建WebSocket连接失败: {SessionId}", sessionId);
-            
-            OnConnectionError(new ConnectionErrorEventArgs
-            {
-                SessionId = sessionId,
-                ErrorType = "ConnectionFailed",
-                ErrorMessage = ex.Message,
-                Exception = ex,
-                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-            });
-            
-            return false;
-        }
-        finally
-        {
-            _connectionLock.Release();
-        }
-    }
-    
-    /// <summary>
-    /// 关闭WebSocket连接
-    /// </summary>
-    /// <param name="sessionId">会话ID</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>关闭任务</returns>
-    public async Task<bool> CloseConnectionAsync(string sessionId, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            if (!_connections.TryRemove(sessionId, out var connection))
-            {
-                _logger.LogWarning("WebSocket连接不存在: {SessionId}", sessionId);
-                return false;
-            }
-            
-            if (connection.WebSocket.State == WebSocketState.Open)
-            {
-                await connection.WebSocket.CloseAsync(
-                    WebSocketCloseStatus.NormalClosure,
-                    "Session ended",
-                    cancellationToken);
-            }
-            
-            connection.WebSocket.Dispose();
-            connection.State = WebSocketState.Closed;
-            
-            OnConnectionStatusChanged(new ConnectionStatusChangedEventArgs
-            {
-                SessionId = sessionId,
-                Status = ConnectionStatus.Disconnected,
-                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-            });
-            
-            _logger.LogInformation("WebSocket连接已关闭: {SessionId}", sessionId);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "关闭WebSocket连接失败: {SessionId}", sessionId);
+            _logger.LogError(ex, "WebSocket连接失败");
+            await OnError?.Invoke(ex)!;
             return false;
         }
     }
     
     /// <summary>
-    /// 发送消息
+    /// 开始会话
     /// </summary>
-    /// <param name="sessionId">会话ID</param>
-    /// <param name="message">协议消息</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>发送任务</returns>
-    public async Task<bool> SendMessageAsync(string sessionId, ProtocolMessage message, CancellationToken cancellationToken = default)
+    public async Task<bool> StartSessionAsync(string sessionId, object sessionConfig)
     {
         try
         {
-            if (!_connections.TryGetValue(sessionId, out var connection))
+            if (!IsConnected)
             {
-                _logger.LogWarning("WebSocket连接不存在: {SessionId}", sessionId);
+                _logger.LogWarning("WebSocket未连接，无法开始会话");
                 return false;
             }
             
-            if (connection.WebSocket.State != WebSocketState.Open)
+            var startSessionRequest = _protocolHandler.CreateStartSessionRequest(sessionId, sessionConfig);
+            await SendBinaryAsync(startSessionRequest);
+            
+            _logger.LogInformation("StartSession请求已发送，SessionId: {SessionId}", sessionId);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "开始会话失败");
+            await OnError?.Invoke(ex)!;
+            return false;
+        }
+    }
+    
+    /// <summary>
+    /// 发送音频数据（TaskRequest）
+    /// </summary>
+    public async Task<bool> SendAudioAsync(string sessionId, byte[] audioData)
+    {
+        try
+        {
+            if (!IsConnected)
             {
-                _logger.LogWarning("WebSocket连接未打开: {SessionId}, 状态: {State}", sessionId, connection.WebSocket.State);
+                _logger.LogWarning("WebSocket未连接，无法发送音频");
                 return false;
             }
             
-            // 设置消息头
-            message.Header.SequenceNumber = ++connection.SequenceNumber;
-            message.Header.Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var taskRequest = _protocolHandler.CreateTaskRequest(sessionId, audioData);
+            await SendBinaryAsync(taskRequest);
             
-            // 序列化消息
-            var messageData = _protocolHandler.SerializeMessage(message);
+            _logger.LogDebug("音频数据已发送，大小: {Size} 字节", audioData.Length);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "发送音频失败");
+            await OnError?.Invoke(ex)!;
+            return false;
+        }
+    }
+    
+    /// <summary>
+    /// 发送ChatTTSText请求（事件500）
+    /// </summary>
+    public async Task<bool> SendChatTtsTextAsync(string sessionId, string content, bool start, bool end)
+    {
+        try
+        {
+            if (!IsConnected)
+            {
+                _logger.LogWarning("WebSocket未连接，无法发送ChatTTSText");
+                return false;
+            }
             
-            // 发送消息
-            await connection.WebSocket.SendAsync(
-                new ArraySegment<byte>(messageData),
+            var chatTtsRequest = _protocolHandler.CreateChatTtsTextRequest(sessionId, content, start, end);
+            await SendBinaryAsync(chatTtsRequest);
+            
+            _logger.LogInformation("ChatTTSText请求已发送: {Content}, Start: {Start}, End: {End}", 
+                content, start, end);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "发送ChatTTSText失败");
+            await OnError?.Invoke(ex)!;
+            return false;
+        }
+    }
+    
+    /// <summary>
+    /// 发送Hello消息（事件300）
+    /// </summary>
+    public async Task<bool> SayHelloAsync()
+    {
+        try
+        {
+            if (!IsConnected)
+            {
+                _logger.LogWarning("WebSocket未连接，无法发送Hello消息");
+                return false;
+            }
+            
+            var helloRequest = _protocolHandler.CreateHelloRequest();
+            await SendBinaryAsync(helloRequest);
+            
+            _logger.LogInformation("Hello消息已发送");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "发送Hello消息失败");
+            await OnError?.Invoke(ex)!;
+            return false;
+        }
+    }
+    
+    /// <summary>
+    /// 结束会话
+    /// </summary>
+    public async Task<bool> FinishSessionAsync(string sessionId)
+    {
+        try
+        {
+            if (!IsConnected)
+            {
+                _logger.LogWarning("WebSocket未连接，无法结束会话");
+                return false;
+            }
+            
+            var finishSessionRequest = _protocolHandler.CreateFinishSessionRequest(sessionId);
+            await SendBinaryAsync(finishSessionRequest);
+            
+            _logger.LogInformation("FinishSession请求已发送，SessionId: {SessionId}", sessionId);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "结束会话失败");
+            await OnError?.Invoke(ex)!;
+            return false;
+        }
+    }
+    
+    /// <summary>
+    /// 断开连接
+    /// </summary>
+    public async Task DisconnectAsync()
+    {
+        try
+        {
+            if (_webSocket?.State == WebSocketState.Open)
+            {
+                // 发送FinishConnection请求
+                var finishConnectionRequest = _protocolHandler.CreateFinishConnectionRequest();
+                await SendBinaryAsync(finishConnectionRequest);
+                
+                // 关闭WebSocket连接
+                await _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "正常关闭", 
+                    CancellationToken.None);
+            }
+            
+            _cancellationTokenSource?.Cancel();
+            _logger.LogInformation("WebSocket连接已断开");
+            await OnDisconnected?.Invoke()!;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "断开连接失败");
+        }
+    }
+    
+    /// <summary>
+    /// 发送二进制数据
+    /// </summary>
+    private async Task SendBinaryAsync(byte[] data)
+    {
+        if (_webSocket?.State == WebSocketState.Open)
+        {
+            await _webSocket.SendAsync(
+                new ArraySegment<byte>(data),
                 WebSocketMessageType.Binary,
                 true,
-                cancellationToken);
-            
-            connection.LastActivity = DateTime.UtcNow;
-            connection.MessagesSent++;
-            
-            _logger.LogDebug("发送消息: {SessionId}, 类型: {MessageType}, 序列号: {SequenceNumber}",
-                sessionId, message.Header.MessageType, message.Header.SequenceNumber);
-            
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "发送消息失败: {SessionId}", sessionId);
-            
-            OnConnectionError(new ConnectionErrorEventArgs
-            {
-                SessionId = sessionId,
-                ErrorType = "SendMessageFailed",
-                ErrorMessage = ex.Message,
-                Exception = ex,
-                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-            });
-            
-            return false;
+                _cancellationTokenSource?.Token ?? CancellationToken.None);
         }
     }
     
     /// <summary>
-    /// 发送心跳消息
+    /// 接收消息
     /// </summary>
-    /// <param name="sessionId">会话ID</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>发送任务</returns>
-    public async Task<bool> SendHeartbeatAsync(string sessionId, CancellationToken cancellationToken = default)
-    {
-        var heartbeatMessage = new Heartbeat
-        {
-            Header = new MessageHeader
-            {
-                Version = "1.0",
-                MessageType = MessageType.Heartbeat,
-                SerializationMethod = SerializationMethod.Json,
-                CompressionMethod = CompressionMethod.None,
-                Flags = MessageFlags.None
-            },
-            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-            ClientId = sessionId
-        };
-        
-        return await SendMessageAsync(sessionId, heartbeatMessage, cancellationToken);
-    }
-    
-    /// <summary>
-    /// 获取连接状态
-    /// </summary>
-    /// <param name="sessionId">会话ID</param>
-    /// <returns>连接状态</returns>
-    public ConnectionStatus GetConnectionStatus(string sessionId)
-    {
-        if (_connections.TryGetValue(sessionId, out var connection))
-        {
-            return connection.WebSocket.State switch
-            {
-                WebSocketState.Open => ConnectionStatus.Connected,
-                WebSocketState.Connecting => ConnectionStatus.Connecting,
-                WebSocketState.CloseSent or WebSocketState.CloseReceived => ConnectionStatus.Disconnecting,
-                _ => ConnectionStatus.Disconnected
-            };
-        }
-        
-        return ConnectionStatus.Disconnected;
-    }
-    
-    /// <summary>
-    /// 获取连接统计信息
-    /// </summary>
-    /// <param name="sessionId">会话ID</param>
-    /// <returns>连接统计</returns>
-    public ConnectionStatistics? GetConnectionStatistics(string sessionId)
-    {
-        if (_connections.TryGetValue(sessionId, out var connection))
-        {
-            return new ConnectionStatistics
-            {
-                SessionId = sessionId,
-                ConnectedAt = connection.ConnectedAt,
-                LastActivity = connection.LastActivity,
-                MessagesSent = connection.MessagesSent,
-                MessagesReceived = connection.MessagesReceived,
-                BytesSent = connection.BytesSent,
-                BytesReceived = connection.BytesReceived,
-                ConnectionDuration = DateTime.UtcNow - connection.ConnectedAt
-            };
-        }
-        
-        return null;
-    }
-    
-    /// <summary>
-    /// 获取所有活跃连接
-    /// </summary>
-    /// <returns>活跃连接列表</returns>
-    public IEnumerable<string> GetActiveConnections()
-    {
-        return _connections.Values
-            .Where(c => c.WebSocket.State == WebSocketState.Open)
-            .Select(c => c.SessionId);
-    }
-    
-    #region Private Methods
-    
-    private async Task ReceiveMessagesAsync(WebSocketConnection connection, CancellationToken cancellationToken)
+    private async Task<DoubaoResponse> ReceiveAsync()
     {
         var buffer = new byte[8192];
-        var messageBuffer = new List<byte>();
+        var result = await _webSocket!.ReceiveAsync(
+            new ArraySegment<byte>(buffer),
+            _cancellationTokenSource?.Token ?? CancellationToken.None);
         
+        var responseData = new byte[result.Count];
+        Array.Copy(buffer, responseData, result.Count);
+        
+        return _protocolHandler.ParseResponse(responseData);
+    }
+    
+    /// <summary>
+    /// 接收循环
+    /// </summary>
+    private async Task ReceiveLoop()
+    {
         try
         {
-            while (connection.WebSocket.State == WebSocketState.Open && !cancellationToken.IsCancellationRequested)
+            while (_webSocket?.State == WebSocketState.Open && 
+                   !(_cancellationTokenSource?.Token.IsCancellationRequested ?? true))
             {
-                var result = await connection.WebSocket.ReceiveAsync(
-                    new ArraySegment<byte>(buffer),
-                    cancellationToken);
-                
-                if (result.MessageType == WebSocketMessageType.Close)
-                {
-                    _logger.LogInformation("WebSocket连接关闭: {SessionId}", connection.SessionId);
-                    break;
-                }
-                
-                messageBuffer.AddRange(buffer.Take(result.Count));
-                
-                if (result.EndOfMessage)
-                {
-                    await ProcessReceivedMessage(connection, messageBuffer.ToArray());
-                    messageBuffer.Clear();
-                }
-                
-                connection.LastActivity = DateTime.UtcNow;
-                connection.MessagesReceived++;
-                connection.BytesReceived += result.Count;
+                var response = await ReceiveAsync();
+                await OnMessageReceived?.Invoke(response)!;
             }
         }
         catch (OperationCanceledException)
         {
-            _logger.LogDebug("WebSocket消息接收已取消: {SessionId}", connection.SessionId);
-        }
-        catch (WebSocketException ex)
-        {
-            _logger.LogError(ex, "WebSocket连接错误: {SessionId}", connection.SessionId);
-            
-            OnConnectionError(new ConnectionErrorEventArgs
-            {
-                SessionId = connection.SessionId,
-                ErrorType = "WebSocketError",
-                ErrorMessage = ex.Message,
-                Exception = ex,
-                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-            });
+            _logger.LogInformation("接收循环已取消");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "接收WebSocket消息时发生错误: {SessionId}", connection.SessionId);
-        }
-        finally
-        {
-            // 连接断开时清理
-            _connections.TryRemove(connection.SessionId, out _);
-            
-            OnConnectionStatusChanged(new ConnectionStatusChangedEventArgs
-            {
-                SessionId = connection.SessionId,
-                Status = ConnectionStatus.Disconnected,
-                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-            });
+            _logger.LogError(ex, "接收循环异常");
+            await OnError?.Invoke(ex)!;
         }
     }
-    
-    private async Task ProcessReceivedMessage(WebSocketConnection connection, byte[] messageData)
-    {
-        try
-        {
-            var message = await _protocolHandler.DeserializeMessageAsync(messageData);
-            
-            _logger.LogDebug("接收消息: {SessionId}, 类型: {MessageType}, 序列号: {SequenceNumber}",
-                connection.SessionId, message.Header.MessageType, message.Header.SequenceNumber);
-            
-            OnMessageReceived(new MessageReceivedEventArgs
-            {
-                SessionId = connection.SessionId,
-                Message = message,
-                ReceivedAt = DateTime.UtcNow
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "处理接收消息失败: {SessionId}", connection.SessionId);
-            
-            OnConnectionError(new ConnectionErrorEventArgs
-            {
-                SessionId = connection.SessionId,
-                ErrorType = "MessageProcessingFailed",
-                ErrorMessage = ex.Message,
-                Exception = ex,
-                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-            });
-        }
-    }
-    
-    private void SendHeartbeats(object? state)
-    {
-        try
-        {
-            var activeSessions = GetActiveConnections().ToList();
-            
-            foreach (var sessionId in activeSessions)
-            {
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        await SendHeartbeatAsync(sessionId);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "发送心跳失败: {SessionId}", sessionId);
-                    }
-                });
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "发送心跳时发生错误");
-        }
-    }
-    
-    private void CleanupExpiredConnections(object? state)
-    {
-        try
-        {
-            var expiredConnections = _connections.Values
-                .Where(c => DateTime.UtcNow - c.LastActivity > _options.SessionTimeout)
-                .ToList();
-            
-            foreach (var connection in expiredConnections)
-            {
-                _logger.LogInformation("清理过期连接: {SessionId}", connection.SessionId);
-                _ = Task.Run(() => CloseConnectionAsync(connection.SessionId));
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "清理过期连接时发生错误");
-        }
-    }
-    
-    private void OnConnectionStatusChanged(ConnectionStatusChangedEventArgs e)
-    {
-        ConnectionStatusChanged?.Invoke(this, e);
-    }
-    
-    private void OnMessageReceived(MessageReceivedEventArgs e)
-    {
-        MessageReceived?.Invoke(this, e);
-    }
-    
-    private void OnConnectionError(ConnectionErrorEventArgs e)
-    {
-        ConnectionError?.Invoke(this, e);
-    }
-    
-    #endregion
     
     public void Dispose()
     {
-        if (_disposed) return;
-        
-        _logger.LogInformation("释放WebSocket客户端管理器资源");
-        
-        // 关闭所有连接
-        var tasks = _connections.Keys.Select(sessionId => CloseConnectionAsync(sessionId)).ToArray();
-        
-        try
+        if (!_disposed)
         {
-            Task.WaitAll(tasks, TimeSpan.FromSeconds(10));
+            _cancellationTokenSource?.Cancel();
+            _cancellationTokenSource?.Dispose();
+            _webSocket?.Dispose();
+            _disposed = true;
         }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "关闭WebSocket连接时发生错误");
-        }
-        
-        _heartbeatTimer?.Dispose();
-        _cleanupTimer?.Dispose();
-        _connectionLock?.Dispose();
-        
-        _disposed = true;
     }
-}
-
-/// <summary>
-/// WebSocket连接
-/// </summary>
-public class WebSocketConnection
-{
-    /// <summary>
-    /// 会话ID
-    /// </summary>
-    public string SessionId { get; set; } = string.Empty;
-    
-    /// <summary>
-    /// WebSocket客户端
-    /// </summary>
-    public ClientWebSocket WebSocket { get; set; } = null!;
-    
-    /// <summary>
-    /// 连接状态
-    /// </summary>
-    public WebSocketState State { get; set; }
-    
-    /// <summary>
-    /// 连接时间
-    /// </summary>
-    public DateTime ConnectedAt { get; set; }
-    
-    /// <summary>
-    /// 最后活动时间
-    /// </summary>
-    public DateTime LastActivity { get; set; }
-    
-    /// <summary>
-    /// 序列号
-    /// </summary>
-    public uint SequenceNumber { get; set; }
-    
-    /// <summary>
-    /// 发送消息数
-    /// </summary>
-    public long MessagesSent { get; set; }
-    
-    /// <summary>
-    /// 接收消息数
-    /// </summary>
-    public long MessagesReceived { get; set; }
-    
-    /// <summary>
-    /// 发送字节数
-    /// </summary>
-    public long BytesSent { get; set; }
-    
-    /// <summary>
-    /// 接收字节数
-    /// </summary>
-    public long BytesReceived { get; set; }
-}
-
-/// <summary>
-/// 连接状态
-/// </summary>
-public enum ConnectionStatus
-{
-    /// <summary>
-    /// 已断开
-    /// </summary>
-    Disconnected,
-    
-    /// <summary>
-    /// 连接中
-    /// </summary>
-    Connecting,
-    
-    /// <summary>
-    /// 已连接
-    /// </summary>
-    Connected,
-    
-    /// <summary>
-    /// 断开中
-    /// </summary>
-    Disconnecting
-}
-
-/// <summary>
-/// 连接状态变化事件参数
-/// </summary>
-public class ConnectionStatusChangedEventArgs : EventArgs
-{
-    /// <summary>
-    /// 会话ID
-    /// </summary>
-    public string SessionId { get; set; } = string.Empty;
-    
-    /// <summary>
-    /// 连接状态
-    /// </summary>
-    public ConnectionStatus Status { get; set; }
-    
-    /// <summary>
-    /// 时间戳
-    /// </summary>
-    public DateTime Timestamp { get; set; }
-}
-
-/// <summary>
-/// 消息接收事件参数
-/// </summary>
-public class MessageReceivedEventArgs : EventArgs
-{
-    /// <summary>
-    /// 会话ID
-    /// </summary>
-    public string SessionId { get; set; } = string.Empty;
-    
-    /// <summary>
-    /// 协议消息
-    /// </summary>
-    public ProtocolMessage Message { get; set; } = null!;
-    
-    /// <summary>
-    /// 接收时间
-    /// </summary>
-    public DateTime ReceivedAt { get; set; }
-}
-
-/// <summary>
-/// 连接错误事件参数
-/// </summary>
-public class ConnectionErrorEventArgs : EventArgs
-{
-    /// <summary>
-    /// 会话ID
-    /// </summary>
-    public string SessionId { get; set; } = string.Empty;
-    
-    /// <summary>
-    /// 错误类型
-    /// </summary>
-    public string ErrorType { get; set; } = string.Empty;
-    
-    /// <summary>
-    /// 错误消息
-    /// </summary>
-    public string ErrorMessage { get; set; } = string.Empty;
-    
-    /// <summary>
-    /// 异常对象
-    /// </summary>
-    public Exception? Exception { get; set; }
-    
-    /// <summary>
-    /// 时间戳
-    /// </summary>
-    public DateTime Timestamp { get; set; }
-}
-
-/// <summary>
-/// 连接统计信息
-/// </summary>
-public class ConnectionStatistics
-{
-    /// <summary>
-    /// 会话ID
-    /// </summary>
-    public string SessionId { get; set; } = string.Empty;
-    
-    /// <summary>
-    /// 连接时间
-    /// </summary>
-    public DateTime ConnectedAt { get; set; }
-    
-    /// <summary>
-    /// 最后活动时间
-    /// </summary>
-    public DateTime LastActivity { get; set; }
-    
-    /// <summary>
-    /// 发送消息数
-    /// </summary>
-    public long MessagesSent { get; set; }
-    
-    /// <summary>
-    /// 接收消息数
-    /// </summary>
-    public long MessagesReceived { get; set; }
-    
-    /// <summary>
-    /// 发送字节数
-    /// </summary>
-    public long BytesSent { get; set; }
-    
-    /// <summary>
-    /// 接收字节数
-    /// </summary>
-    public long BytesReceived { get; set; }
-    
-    /// <summary>
-    /// 连接持续时间
-    /// </summary>
-    public TimeSpan ConnectionDuration { get; set; }
 }
