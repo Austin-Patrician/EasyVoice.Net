@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net9.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
@@ -14,11 +14,12 @@
   <ItemGroup>
     <ProjectReference Include="..\EasyVoice.Core\EasyVoice.Core.csproj" />
     <ProjectReference Include="..\EasyVoice.Infrastructure\EasyVoice.Infrastructure.csproj" />
+    <ProjectReference Include="..\EasyVoice.RealtimeDialog\EasyVoice.RealtimeDialog.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <Folder Include="audio\" />
-    <Folder Include="Extensions\" />
+    <Folder Include="Examples\" />
   </ItemGroup>
 
 </Project>

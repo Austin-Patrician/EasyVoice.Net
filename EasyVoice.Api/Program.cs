@@ -1,4 +1,7 @@
 using FFMpegCore;
+using Microsoft.AspNetCore.WebSockets;
+using EasyVoice.RealtimeDialog.Extensions;
+using EasyVoice.RealtimeDialog.Hubs;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -68,8 +71,13 @@ builder.Services.AddScoped<EasyVoice.Core.Interfaces.ILlmService, EasyVoice.Core
 builder.Services.AddScoped<EasyVoice.Core.Interfaces.IAnalysisTextService, EasyVoice.Core.Services.AnalysisTextService>();
 
 // Register Real-time service
-builder.Services.AddScoped<EasyVoice.Core.Interfaces.IRealTimeService, EasyVoice.Core.Services.DoubaoRealTimeService>();
 builder.Services.AddMemoryCache();
+// Add SignalR support
+builder.Services.AddSignalR();
+
+// Add Real-time Dialog services
+builder.Services.AddRealtimeDialog(builder.Configuration);
+
 // Add controllers to the container.
 builder.Services.AddControllers();
 builder.Services.AddCors(_=> _.AddDefaultPolicy(policy =>
@@ -78,6 +86,12 @@ builder.Services.AddCors(_=> _.AddDefaultPolicy(policy =>
           .AllowAnyHeader()
           .AllowAnyMethod();
 }));
+
+// Add WebSocket support
+builder.Services.AddWebSockets(options =>
+{
+    options.KeepAliveInterval = TimeSpan.FromMinutes(2);
+});
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -94,7 +108,13 @@ if (app.Environment.IsDevelopment())
 app.UseCors();
 app.UseHttpsRedirection();
 
+// Enable WebSocket support
+app.UseWebSockets();
+
 app.UseAuthorization();
+
+// Map SignalR hubs
+app.MapHub<RealtimeDialogHub>("/hubs/realtime-dialog");
 
 app.MapControllers();
 

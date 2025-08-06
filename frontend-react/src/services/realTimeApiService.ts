@@ -1,15 +1,36 @@
 import { API_ENDPOINTS } from '../constants';
 import { 
-  CreateSessionRequest, 
-  CreateSessionResponse,
-  StartSessionRequest,
-  SessionStatusResponse,
-  SayHelloRequest,
   RealTimeConnectionState,
   AudioDataEvent,
   DialogEvent,
   ConnectionStateEvent
 } from '../types';
+
+// 新的API请求类型
+interface RealTimeConnectRequest {
+  appId: string;
+  accessToken: string;
+  botName?: string;
+  systemRole?: string;
+  greetingMessage?: string;
+  voiceType?: string;
+  speed?: number;
+  volume?: number;
+  pitch?: number;
+  audioEncoding?: string;
+  sampleRate?: number;
+  enableTimestamp?: boolean;
+  inputSampleRate?: number;
+  outputSampleRate?: number;
+  inputChannels?: number;
+  outputChannels?: number;
+  bufferSize?: number;
+  frameSize?: number;
+}
+
+interface SendTextRequest {
+  text: string;
+}
 
 /**
  * 实时语音API服务类
@@ -18,7 +39,6 @@ import {
 export class RealTimeApiService {
   private baseUrl: string;
   private ws: WebSocket | null = null;
-  private sessionId: string | null = null;
   private connectionState: RealTimeConnectionState = RealTimeConnectionState.Disconnected;
   private eventListeners: Map<string, Function[]> = new Map();
   private reconnectAttempts = 0;
@@ -87,11 +107,13 @@ export class RealTimeApiService {
   // #region HTTP API Methods
 
   /**
-   * 创建会话
+   * 连接到实时语音服务
    */
-  public async createSession(request: CreateSessionRequest): Promise<CreateSessionResponse> {
+  public async connect(request: RealTimeConnectRequest): Promise<void> {
     try {
-      const response = await fetch(`${this.baseUrl}${API_ENDPOINTS.REALTIME.CREATE_SESSION}`, {
+      this.setConnectionState(RealTimeConnectionState.Connecting);
+      
+      const response = await fetch(`${this.baseUrl}${API_ENDPOINTS.REALTIME.CONNECT}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -101,24 +123,95 @@ export class RealTimeApiService {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
       }
 
-      const data = await response.json();
-      this.sessionId = data.sessionId;
-      return data;
+      this.setConnectionState(RealTimeConnectionState.Connected);
     } catch (error) {
-      console.error('创建会话失败:', error);
+      console.error('连接实时语音服务失败:', error);
+      this.setConnectionState(RealTimeConnectionState.Disconnected);
       throw error;
     }
   }
 
   /**
-   * 启动会话
+   * 断开实时语音服务连接
    */
-  public async startSession(sessionId: string, request: StartSessionRequest): Promise<void> {
+  public async disconnect(): Promise<void> {
     try {
-      const response = await fetch(`${this.baseUrl}${API_ENDPOINTS.REALTIME.START_SESSION.replace('{sessionId}', sessionId)}`, {
+      // 先断开WebSocket
+      this.disconnectWebSocket();
+      
+      const response = await fetch(`${this.baseUrl}${API_ENDPOINTS.REALTIME.DISCONNECT}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+      }
+
+      this.setConnectionState(RealTimeConnectionState.Disconnected);
+    } catch (error) {
+      console.error('断开连接失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 启用音频功能
+   */
+  public async enableAudio(): Promise<void> {
+    try {
+      const response = await fetch(`${this.baseUrl}${API_ENDPOINTS.REALTIME.ENABLE_AUDIO}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+      }
+    } catch (error) {
+      console.error('启用音频失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 禁用音频功能
+   */
+  public async disableAudio(): Promise<void> {
+    try {
+      const response = await fetch(`${this.baseUrl}${API_ENDPOINTS.REALTIME.DISABLE_AUDIO}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+      }
+    } catch (error) {
+      console.error('禁用音频失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 发送文本消息
+   */
+  public async sendText(text: string): Promise<void> {
+    try {
+      const request: SendTextRequest = { text };
+      const response = await fetch(`${this.baseUrl}${API_ENDPOINTS.REALTIME.SEND_TEXT}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -128,22 +221,20 @@ export class RealTimeApiService {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
       }
-
-      this.sessionId = sessionId;
     } catch (error) {
-      console.error('启动会话失败:', error);
+      console.error('发送文本失败:', error);
       throw error;
     }
   }
 
   /**
-   * 获取会话状态
+   * 获取连接状态
    */
-  public async getSessionStatus(sessionId: string): Promise<SessionStatusResponse> {
+  public async getStatus(): Promise<{ state: string; timestamp: number }> {
     try {
-      const response = await fetch(`${this.baseUrl}${API_ENDPOINTS.REALTIME.GET_STATUS.replace('{sessionId}', sessionId)}`, {
+      const response = await fetch(`${this.baseUrl}${API_ENDPOINTS.REALTIME.STATUS}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -152,147 +243,12 @@ export class RealTimeApiService {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
       }
 
       return await response.json();
     } catch (error) {
-      console.error('获取会话状态失败:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * 发送问候语
-   */
-  public async sayHello(sessionId: string, request: SayHelloRequest): Promise<void> {
-    try {
-      const response = await fetch(`${this.baseUrl}${API_ENDPOINTS.REALTIME.SAY_HELLO.replace('{sessionId}', sessionId)}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(request),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-      }
-    } catch (error) {
-      console.error('发送问候语失败:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * 开始录音
-   */
-  public async startRecording(sessionId: string): Promise<void> {
-    try {
-      const response = await fetch(`${this.baseUrl}${API_ENDPOINTS.REALTIME.START_RECORDING.replace('{sessionId}', sessionId)}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-      }
-    } catch (error) {
-      console.error('开始录音失败:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * 停止录音
-   */
-  public async stopRecording(sessionId: string): Promise<void> {
-    try {
-      const response = await fetch(`${this.baseUrl}${API_ENDPOINTS.REALTIME.STOP_RECORDING.replace('{sessionId}', sessionId)}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-      }
-    } catch (error) {
-      console.error('停止录音失败:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * 开始播放
-   */
-  public async startPlayback(sessionId: string): Promise<void> {
-    try {
-      const response = await fetch(`${this.baseUrl}${API_ENDPOINTS.REALTIME.START_PLAYBACK.replace('{sessionId}', sessionId)}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-      }
-    } catch (error) {
-      console.error('开始播放失败:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * 停止播放
-   */
-  public async stopPlayback(sessionId: string): Promise<void> {
-    try {
-      const response = await fetch(`${this.baseUrl}${API_ENDPOINTS.REALTIME.STOP_PLAYBACK.replace('{sessionId}', sessionId)}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-      }
-    } catch (error) {
-      console.error('停止播放失败:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * 结束会话
-   */
-  public async finishSession(sessionId: string): Promise<void> {
-    try {
-      const response = await fetch(`${this.baseUrl}${API_ENDPOINTS.REALTIME.FINISH_SESSION.replace('{sessionId}', sessionId)}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-      }
-
-      this.sessionId = null;
-    } catch (error) {
-      console.error('结束会话失败:', error);
+      console.error('获取状态失败:', error);
       throw error;
     }
   }
@@ -304,21 +260,18 @@ export class RealTimeApiService {
   /**
    * 连接WebSocket
    */
-  public async connectWebSocket(sessionId: string): Promise<void> {
+  public async connectWebSocket(): Promise<void> {
     try {
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
         console.warn('WebSocket已连接');
         return;
       }
 
-      this.setConnectionState(RealTimeConnectionState.Connecting);
-
-      const wsUrl = `${this.baseUrl.replace('http', 'ws')}${API_ENDPOINTS.REALTIME.WEBSOCKET.replace('{sessionId}', sessionId)}`;
+      const wsUrl = `${this.baseUrl.replace('http', 'ws')}${API_ENDPOINTS.REALTIME.WEBSOCKET}`;
       this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {
         console.log('WebSocket连接已建立');
-        this.setConnectionState(RealTimeConnectionState.Connected);
         this.reconnectAttempts = 0;
       };
 
@@ -328,11 +281,10 @@ export class RealTimeApiService {
 
       this.ws.onclose = (event) => {
         console.log('WebSocket连接已关闭:', event.code, event.reason);
-        this.setConnectionState(RealTimeConnectionState.Disconnected);
         
         // 如果不是正常关闭，尝试重连
         if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
-          this.attemptReconnect(sessionId);
+          this.attemptReconnect();
         }
       };
 
@@ -343,7 +295,6 @@ export class RealTimeApiService {
 
     } catch (error) {
       console.error('连接WebSocket失败:', error);
-      this.setConnectionState(RealTimeConnectionState.Disconnected);
       throw error;
     }
   }
@@ -353,7 +304,6 @@ export class RealTimeApiService {
    */
   public disconnectWebSocket(): void {
     if (this.ws) {
-      this.setConnectionState(RealTimeConnectionState.Disconnecting);
       this.ws.close(1000, '正常关闭');
       this.ws = null;
     }
@@ -362,14 +312,14 @@ export class RealTimeApiService {
   /**
    * 尝试重连
    */
-  private attemptReconnect(sessionId: string): void {
+  private attemptReconnect(): void {
     this.reconnectAttempts++;
     const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
     
     console.log(`尝试重连 (${this.reconnectAttempts}/${this.maxReconnectAttempts})，${delay}ms后重试`);
     
     setTimeout(() => {
-      this.connectWebSocket(sessionId).catch(error => {
+      this.connectWebSocket().catch(error => {
         console.error('重连失败:', error);
       });
     }, delay);
@@ -385,53 +335,49 @@ export class RealTimeApiService {
       switch (data.type) {
         case 'audio_data':
           this.emit('audioData', {
-            data: data.audioData,
-            format: 'pcm',
-            sampleRate: 24000,
-            channels: 1
+            data: data.data.data,
+            timestamp: data.data.timestamp
           } as AudioDataEvent);
           break;
           
         case 'dialog_event':
           this.emit('dialogEvent', {
-            type: data.eventType || 'bot_response',
-            content: data.content,
-            timestamp: new Date()
+            eventType: data.data.eventType,
+            data: data.data.data,
+            timestamp: data.data.timestamp
           } as DialogEvent);
-          break;
-          
-        case 'connection_state':
-          this.setConnectionState(data.state);
           break;
           
         case 'error':
           this.emit('error', {
-            message: data.message,
-            code: data.code
+            message: data.data.message,
+            code: data.data.code,
+            timestamp: data.data.timestamp
           });
+          break;
+          
+        case 'connection_state':
+          this.emit('connectionStateChanged', {
+            oldState: data.data.oldState,
+            newState: data.data.newState,
+            timestamp: data.data.timestamp
+          } as ConnectionStateEvent);
           break;
           
         default:
           console.warn('未知的WebSocket消息类型:', data.type);
       }
     } catch (error) {
-      console.error('解析WebSocket消息失败:', error);
+      console.error('处理WebSocket消息失败:', error);
     }
   }
 
   /**
    * 发送音频数据
    */
-  public sendAudioData(audioData: ArrayBuffer, sequence?: number): void {
+  public sendAudioData(audioData: ArrayBuffer): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      const message = {
-        type: 'audio_data',
-        audioData: Array.from(new Uint8Array(audioData)),
-        sequence: sequence || Date.now(),
-        timestamp: Date.now()
-      };
-      
-      this.ws.send(JSON.stringify(message));
+      this.ws.send(audioData);
     } else {
       console.warn('WebSocket未连接，无法发送音频数据');
     }
@@ -439,28 +385,7 @@ export class RealTimeApiService {
 
   // #endregion
 
-  // #region Getters
-
-  /**
-   * 获取当前会话ID
-   */
-  public getSessionId(): string | null {
-    return this.sessionId;
-  }
-
-  /**
-   * 获取连接状态
-   */
-  public getConnectionState(): RealTimeConnectionState {
-    return this.connectionState;
-  }
-
-  /**
-   * 检查是否已连接
-   */
-  public isConnected(): boolean {
-    return this.connectionState === RealTimeConnectionState.Connected;
-  }
+  // #region Utility Methods
 
   /**
    * 检查WebSocket是否已连接
@@ -469,9 +394,12 @@ export class RealTimeApiService {
     return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
   }
 
-  // #endregion
-
-  // #region Cleanup
+  /**
+   * 获取当前连接状态
+   */
+  public getConnectionState(): RealTimeConnectionState {
+    return this.connectionState;
+  }
 
   /**
    * 清理资源
@@ -479,12 +407,61 @@ export class RealTimeApiService {
   public dispose(): void {
     this.disconnectWebSocket();
     this.eventListeners.clear();
-    this.sessionId = null;
-    this.reconnectAttempts = 0;
+  }
+
+  // #endregion
+
+  // #region 兼容性方法（为了适配现有的前端代码）
+
+  /**
+   * 创建会话（兼容性方法）
+   */
+  public async createSession(request: any): Promise<any> {
+    // 转换为新的连接请求格式
+    const connectRequest: RealTimeConnectRequest = {
+      appId: request.appId,
+      accessToken: request.accessToken,
+      botName: request.botName,
+      systemRole: request.systemRole,
+      greetingMessage: request.greetingMessage
+    };
+    
+    await this.connect(connectRequest);
+    return { sessionId: 'default' }; // 返回一个默认的sessionId
+  }
+
+  /**
+   * 启动会话（兼容性方法）
+   */
+  public async startSession(sessionId: string, request: any): Promise<void> {
+    await this.enableAudio();
+    this.emit('sessionStarted', { sessionId });
+  }
+
+  /**
+   * 结束会话（兼容性方法）
+   */
+  public async finishSession(sessionId: string): Promise<void> {
+    await this.disableAudio();
+    await this.disconnect();
+    this.emit('sessionEnded', { sessionId });
+  }
+
+  /**
+   * 发送问候语（兼容性方法）
+   */
+  public async sayHello(sessionId: string, request: any): Promise<void> {
+    if (request.content) {
+      await this.sendText(request.content);
+    }
+  }
+
+  /**
+   * 获取会话ID（兼容性方法）
+   */
+  public getSessionId(): string | null {
+    return this.connectionState === RealTimeConnectionState.Connected ? 'default' : null;
   }
 
   // #endregion
 }
-
-// 创建默认实例
-export const realTimeApiService = new RealTimeApiService();

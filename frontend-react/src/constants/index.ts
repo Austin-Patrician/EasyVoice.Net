@@ -92,17 +92,13 @@ export const API_ENDPOINTS = {
   DOUBAO_TTS: '/api/doubao-tts',
   // 实时语音端点
   REALTIME: {
-    CREATE_SESSION: '/api/realtime/session/create',
-    START_SESSION: '/api/realtime/session/{sessionId}/start',
-    GET_SESSION_STATUS: '/api/realtime/session/{sessionId}/status',
-    GET_STATUS: '/api/realtime/session/{sessionId}/status',
-    FINISH_SESSION: '/api/realtime/session/{sessionId}/finish',
-    SAY_HELLO: '/api/realtime/session/{sessionId}/hello',
-    START_RECORDING: '/api/realtime/session/{sessionId}/audio/start-recording',
-    STOP_RECORDING: '/api/realtime/session/{sessionId}/audio/stop-recording',
-    START_PLAYBACK: '/api/realtime/session/{sessionId}/audio/start-playback',
-    STOP_PLAYBACK: '/api/realtime/session/{sessionId}/audio/stop-playback',
-    WEBSOCKET: '/api/realtime/session/{sessionId}/websocket'
+    CONNECT: '/api/realtime/connect',
+    DISCONNECT: '/api/realtime/disconnect',
+    ENABLE_AUDIO: '/api/realtime/enable-audio',
+    DISABLE_AUDIO: '/api/realtime/disable-audio',
+    SEND_TEXT: '/api/realtime/send-text',
+    STATUS: '/api/realtime/status',
+    WEBSOCKET: '/api/realtime/ws'
   },
   // 兼容性端点（保留旧的端点）
   REALTIME_CONNECT: '/api/realtime/connect',
