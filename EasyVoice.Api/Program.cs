@@ -115,4 +115,7 @@ app.UseAuthorization();
 
 app.MapControllers();
 
+// Map SignalR Hub
+app.MapHub<EasyVoice.RealtimeDialog.Hubs.RealtimeDialogHub>("/realtimeDialogHub");
+
 app.Run();

@@ -96,6 +96,10 @@ namespace EasyVoice.RealtimeDialog
         private readonly DouBaoRealTimeClient _client;
         private readonly AudioDeviceManager _audioDevice;
         
+        // 添加事件支持
+        public event Func<byte[], Task>? OnAudioDataReceived;
+        public event Func<string, object, Task>? OnDialogEvent;
+        
         private bool _isRunning = true;
         private bool _isSessionFinished = false;
         private bool _isUserQuerying = false;
@@ -161,6 +165,28 @@ namespace EasyVoice.RealtimeDialog
         }
 
         /// <summary>
+        /// 发送音频数据
+        /// </summary>
+        public async Task SendAudioAsync(byte[] audioData)
+        {
+            await _client.TaskRequestAsync(audioData, _cancellationTokenSource.Token);
+        }
+
+        /// <summary>
+        /// 发送ChatTTS文本
+        /// </summary>
+        public async Task SendChatTtsTextAsync(string text)
+        {
+            _isSendingChatTtsText = true;
+            await _client.ChatTtsTextAsync(
+                _isUserQuerying,
+                start: true,
+                end: true,
+                text,
+                _cancellationTokenSource.Token);
+        }
+
+        /// <summary>
         /// 处理服务器响应
         /// </summary>
         public void HandleServerResponse(Dictionary<string, object> response)
@@ -175,6 +201,9 @@ namespace EasyVoice.RealtimeDialog
                 if (_isSendingChatTtsText)
                     return;
                     
+                // 触发音频数据事件
+                OnAudioDataReceived?.Invoke(audioData);
+                
                 _audioQueue.Enqueue(audioData);
                 _audioBuffer.AddRange(audioData);
             }
@@ -192,6 +221,9 @@ namespace EasyVoice.RealtimeDialog
                         // 清空音频队列
                         while (_audioQueue.TryDequeue(out _)) { }
                         _isUserQuerying = true;
+                        
+                        // 触发ASR信息事件
+                        OnDialogEvent?.Invoke("ASR_INFO", response);
                     }
                     
                     if (eventCode == 350 && _isSendingChatTtsText && 
@@ -202,9 +234,33 @@ namespace EasyVoice.RealtimeDialog
                         _isSendingChatTtsText = false;
                     }
                     
+                    if (eventCode == 460)
+                    {
+                        _isSendingChatTtsText = false;
+                        
+                        // 触发TTS结束事件
+                        OnDialogEvent?.Invoke("TTS_ENDED", response);
+                    }
+                    
+                    if (eventCode == 461)
+                    {
+                        // 触发TTS响应事件
+                        OnDialogEvent?.Invoke("TTS_RESPONSE", response);
+                    }
+                    
+                    if (eventCode == 451)
+                    {
+                        // 触发ASR识别结果事件
+                        OnDialogEvent?.Invoke("ASR_RESPONSE", response);
+                    }
+                    
                     if (eventCode == 459)
                     {
                         _isUserQuerying = false;
+                        
+                        // 触发ASR结束事件
+                        OnDialogEvent?.Invoke("ASR_ENDED", response);
+                        
                         // 概率触发ChatTTSText
                         if (new Random().Next(0, 2) == 0)
                         {

@@ -336,13 +336,16 @@ export class RealTimeApiService {
         case 'audio_data':
           this.emit('audioData', {
             data: data.data.data,
-            timestamp: data.data.timestamp
+            timestamp: data.data.timestamp,
+            format: 'pcm',
+            sampleRate: 16000,
+            channels: 1
           } as AudioDataEvent);
           break;
           
         case 'dialog_event':
           this.emit('dialogEvent', {
-            eventType: data.data.eventType,
+            type: data.data.eventType,
             data: data.data.data,
             timestamp: data.data.timestamp
           } as DialogEvent);
