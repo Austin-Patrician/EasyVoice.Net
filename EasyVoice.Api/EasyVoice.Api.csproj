@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <Folder Include="audio\" />
+    <Folder Include="Hubs\" />
   </ItemGroup>
 
 </Project>

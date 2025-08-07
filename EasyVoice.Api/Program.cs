@@ -1,6 +1,5 @@
 using FFMpegCore;
 using Microsoft.AspNetCore.WebSockets;
-using EasyVoice.Api.Hubs;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -72,12 +71,6 @@ builder.Services.AddScoped<EasyVoice.Core.Interfaces.IAnalysisTextService, EasyV
 // Register Real-time Dialog services
 builder.Services.AddMemoryCache();
 
-// Register Realtime Dialog services
-builder.Services.AddSingleton<EasyVoice.RealtimeDialog.Services.DoubaoProtocolHandler>();
-builder.Services.AddSingleton<EasyVoice.RealtimeDialog.Services.WebSocketClientManager>();
-builder.Services.AddSingleton<EasyVoice.RealtimeDialog.Services.RealtimeDialogService>();
-builder.Services.AddSingleton<EasyVoice.RealtimeDialog.Services.AudioService>();
-
 // Add SignalR support
 builder.Services.AddSignalR();
 
@@ -119,11 +112,6 @@ app.UseHttpsRedirection();
 app.UseWebSockets();
 
 app.UseAuthorization();
-
-// Map SignalR hubs
-app.MapHub<RealtimeDialogHub>("/hubs/realtime-dialog");
-// Map RealTime WebSocket endpoint for frontend integration
-app.MapHub<RealtimeDialogHub>("/api/realtime/ws");
 
 app.MapControllers();
 

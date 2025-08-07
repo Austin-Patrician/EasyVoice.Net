@@ -144,9 +144,9 @@ class DialogSession:
 
             if event == 459:
                 self.is_user_querying = False
-                if random.randint(0, 1) == 0:
-                    self.is_sending_chat_tts_text = True
-                    asyncio.create_task(self.trigger_chat_tts_text())
+                # if random.randint(0, 1) == 0:
+                #     self.is_sending_chat_tts_text = True
+                #     asyncio.create_task(self.trigger_chat_tts_text())
         elif response['message_type'] == 'SERVER_ERROR':
             print(f"服务器错误: {response['payload_msg']}")
             raise Exception("服务器错误")

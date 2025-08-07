@@ -72,7 +72,7 @@ public class AudioDeviceInfo
     /// <summary>
     /// 支持的音频格式
     /// </summary>
-    public List<AudioConfig> SupportedFormats { get; set; } = new();
+    public List<Protocol.AudioConfig> SupportedFormats { get; set; } = new();
 }
 
 /// <summary>
